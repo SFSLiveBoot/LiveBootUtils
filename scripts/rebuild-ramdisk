@@ -1,0 +1,33 @@
+#!/bin/sh -e
+
+orig="$1"
+dst="$2"
+kver="${3:-$(uname -r)}"
+extra_mods="$4"
+
+test -e "$orig" -a -n "$dst" || {
+  echo "Usage: $0 <ramdisk.orig> <ramdisk.new> [<kver>=$kver] [extra_mods=$extra_mods..]"
+  exit 1
+}
+
+workdir="$(mktemp -d)"
+echo "Extracting $orig to $workdir"
+gzip -dc <"$orig" | (cd "$workdir" ; cpio -id)
+
+orig_dirs="$(find $workdir/lib/modules -maxdepth 1 -mindepth 1)"
+modlist="$(find "$workdir/lib/modules" -name *.ko | sed -e 's@.*/@@' -e 's@.ko$@@') $extra_mods"
+
+echo "Removing $orig_dirs"
+for moddir in $orig_dirs;do rm -r "$moddir";done
+
+echo "Re-finding $orig_dirs .ko files from /lib/modules/$kver"
+
+KVERS="$kver" "$(dirname "$0")/moddep" "$workdir" $modlist
+
+depmod -b "$workdir" "$kver"
+
+echo "Packing $workdir to $dst"
+(cd "$workdir"; find . | cpio -o -H newc) | gzip -c > "$dst"
+
+echo "Removing $workdir"
+rm -r "$workdir"

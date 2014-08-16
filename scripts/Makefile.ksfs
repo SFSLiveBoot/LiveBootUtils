@@ -1,0 +1,55 @@
+#!/usr/bin/make -f
+
+KVER=$(shell make kernelversion)
+
+OUT_DIR=$(PWD)/../build
+BUILD_DIR=$(OUT_DIR)/linux-$(KVER)
+DEB_DIR=$(OUT_DIR)/linux-$(KVER).d
+
+KREL=$(shell make O="$(BUILD_DIR)" kernelrelease)
+
+DEB_ARCH=$(shell dpkg-architecture -qDEB_BUILD_ARCH)
+DEB_COUNT=$(shell cat "$(BUILD_DIR)/.version" || echo 1)
+
+DEB_PKG=$(OUT_DIR)/linux-image-$(KREL)_$(KREL)-$(DEB_COUNT)_$(DEB_ARCH).deb
+
+AUFS_DIR=$(PWD)/../aufs3-standalone
+AUFS_BRVER=$(shell echo "$(KVER)" | sed -e 's/^\([0-9]\+\.[0-9]\+\).*/\1/')
+
+AUFS_MOD=$(DEB_DIR)/lib/modules/$(KREL)/extra/aufs.ko
+
+CPU_COUNT=$(shell grep -c ^processor /proc/cpuinfo)
+
+SFS_FILE=$(OUT_DIR)/kernel-$(KREL).sfs
+
+all:	$(BUILD_DIR)/.config $(SFS_FILE)
+
+
+$(AUFS_DIR)/config.mk:	$(AUFS_DIR)/README
+	cd $(AUFS_DIR) ; git checkout aufs$(AUFS_BRVER)
+
+.aufs-patched: $(AUFS_DIR)/config.mk
+	grep -q "^extern int update_time" include/linux/fs.h || patch -p1 < $(AUFS_DIR)/aufs3-base.patch
+	grep -q '^EXPORT_SYMBOL(update_time)' fs/inode.c || patch -p1 < $(AUFS_DIR)/aufs3-standalone.patch
+	@touch .aufs-patched
+
+$(BUILD_DIR)/.config:	.aufs-patched
+	mkdir -p "$(BUILD_DIR)"
+	make O=$(BUILD_DIR) oldconfig
+
+menuconfig:
+	mkdir -p "$(BUILD_DIR)"
+	make O=$(BUILD_DIR) menuconfig
+
+$(DEB_PKG):	$(BUILD_DIR)/.config
+	time make -j$(CPU_COUNT) O=$(BUILD_DIR) INSTALL_MOD_STRIP=1 deb-pkg
+
+$(DEB_DIR):	$(DEB_PKG)
+	find "$(OUT_DIR)" -maxdepth 1 -name "linux-*_$(KREL)-$(DEB_COUNT)_$(DEB_ARCH).deb" -not -name "linux-libc-dev_*" -exec sh -c 'for deb;do dpkg-deb -x "$$deb" "$(DEB_DIR)";done' a {} +
+
+$(AUFS_MOD):	$(DEB_DIR)
+	cd ../aufs3-standalone && make KDIR="$(BUILD_DIR)" INSTALL_MOD_PATH="$(DEB_DIR)" INSTALL_MOD_STRIP=1 install
+	/sbin/depmod -b "$(DEB_DIR)" $(KREL)
+
+$(SFS_FILE):	$(AUFS_MOD)
+	mksquashfs "$(DEB_DIR)" "$@" -noappend -all-root 

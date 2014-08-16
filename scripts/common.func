@@ -1,0 +1,631 @@
+#!/bin/sh
+
+exit_trap() { show_info "$1"; exit $2; }
+trap_fail() { trap 'exit_trap "$0: execution failed." 1' EXIT; set -e; }
+exit_succ() { trap 'exit_trap "$0: Success." 0' EXIT; }
+
+grub_cfg_gfx() {
+  local ldn="$1" wd="$2" d
+  shift 2
+  for d in "$@";do
+    if test -e "$d/font.pf2" -a -e "$d/logo.png";then
+      mkdir -p "$wd/$ldn"
+      cp -vt "$wd/$ldn" "$d/font.pf2" "$d/logo.png" >&2
+      cat <<EOF
+insmod font
+if loadfont /$ldn/font.pf2;then
+  insmod vbe
+  insmod gfxterm
+  set gfxmode=800x600x16
+  if terminal_output gfxterm;then
+    insmod png
+    background_image -m stretch /$ldn/logo.png
+  fi
+fi
+EOF
+      break
+    fi
+  done
+}
+
+grub_cfg_entry() {
+  local ldn="$1" name="$2" livedev="$3" vmlinuz="$4" ramdisk="$5" storage="$6" arch_sfs parts
+  shift 6 || { echo "Usage: $FUNCNAME livedirname entry_name live_dev vmlinuz initrd storage [parts]" >&2 ; return 1; }
+  while test -n "$1";do
+    parts="$parts:$ldn/$1.sfs+"
+    shift
+  done
+  test -n "$parts" || {
+    parts=":$ldn/*.sfs+"
+    case "$vmlinuz" in */*) arch_sfs=":$ldn/${vmlinuz%/*}/*.sfs+" ;; esac
+  }
+  cat <<EOF
+menuentry "$name" {
+ linux /$ldn/$vmlinuz root=$livedev$parts$arch_sfs$storage quiet max_loop=64
+ initrd /$ldn/$ramdisk
+}
+EOF
+}
+
+grub_cfg_allentries() {
+  local ldn="$1" tgt="$2" livedev="$3" storage_dev="$4" vmlinuz="vmlinuz-`uname -r`" initrd="ramdisk-`uname -r`" arch
+  test -n "$ldn" -a -n "$tgt" -a -n "$livedev" || {
+    echo "Usage: $FUNCNAME <ldn> <tgt_mnt> <livedev> [<storage_dev>]" >&2
+    return 1
+  }
+  if test -e "$tgt/$ldn/`uname -m`";then
+    for vm_arch in "$tgt/$ldn"/*/"$vmlinuz";do
+      arch="${vm_arch%/*}"
+      arch="${arch##*/}"
+      test -z "$storage_dev" ||
+        grub_cfg_entry "$ldn" "Boot $livedev [$arch/$storage_dev]" "$livedev" "$arch/$vmlinuz" "$arch/$initrd" "$storage_dev"
+      grub_cfg_entry "$ldn" "Boot $livedev [$arch/mem]" "$livedev" "$arch/$vmlinuz" "$arch/$initrd" mem
+      grub_cfg_entry "$ldn" "Boot $livedev [$arch/noextra]"  "$livedev" "$arch/$vmlinuz" "$arch/$initrd" mem root home $arch/kernel-`uname -r`
+    
+    done
+  elif test -e "$tgt/vmlinuz-`uname -r`";then
+    test -z "$storage_dev" ||
+      grub_cfg_entry "$ldn" "Boot $livedev [$storage_dev]" "$livedev" "$vmlinuz" "$initrd" mem
+    grub_cfg_entry "$ldn" "Boot $livedev [mem]" "$livedev" "$vmlinuz" "$initrd" mem
+    grub_cfg_entry "$ldn" "Boot $livedev [noextra]" "$livedev" "$vmlinuz" "$initrd" mem root home kernel-`uname -r`
+  else
+    echo "Cannot find $vmlinuz"
+  fi
+}
+
+MKRD_D="${MKRD_D:-/usr/src/make-ramdisk}"
+make_ramdisk() {
+  test "x$1" = "x-o" || {
+    echo "Usage: $FUNCNAME -o <outfile> [<make args>]" >&2
+    echo "  example make args: KVERS=`uname -r`" >&2
+    return 1
+  }
+  local outfile="$2"
+  shift 2
+  test -d "$MKRD_D" || git clone git://github.com/korc/make-ramdisk.git "$MKRD_D"
+  make -C "$MKRD_D" RAMDISK="$outfile" "$@"
+}
+
+sfs_stamp_file() {
+  if test -e "$1" && stamp="$(unsquashfs -s "$1" | grep time | cut -f7- -d" ")";then
+    date -d "$stamp" +%s
+  else
+   ret=1
+  fi
+}
+
+as_root() {
+  if test "$(id -u)" = 0;then "$@"
+  else sudo "$@"
+  fi
+}
+
+sfs_stamp() {
+  local stamp dl_tmp ret
+  case "$1" in
+    http://*|https://*|ftp://*)
+      dl_tmp="$(mktemp)"
+      if curl -f -s -r 0-1024 -o "$dl_tmp" "$1";then
+        sfs_stamp_file "$dl_tmp"
+        ret="$?"
+      else ret=1;fi
+      rm "$dl_tmp"
+    ;;
+    *) sfs_stamp_file "$1" ;;
+  esac
+  return $ret
+}
+
+copy_related_files() {
+  local cp_cmd="copy_verbose" dst f arch="`uname -m`" kver="`uname -r`" d_kern f_kern d_arch d_sup f2 d_arch2
+  test "x$1" != "x-cmd" || { cp_cmd="$2" ; shift 2 ; }
+  test "x$1" != "x-arch" || { arch="$2" ; shift 2; }
+  dst="$1" f="$2"
+  test -n "$dst" || { echo "Usage: $FUNCNAME <dirname=$dst> <filename=$f>" >&2; return 1; }
+  mkdir -p "$dst"
+  case "$f" in *.sfs.[0-9]*) f="${f%.sfs.[0-9]*}.sfs";;esac
+  case "$f" in
+    */$arch/*.sfs)
+      d_arch="${f%/*}"
+      for f2 in "${d_arch%/*}"/*/"${f##*/}";do
+        d_arch2="${f2%/*}"
+        copy_related_files -cmd "$cp_cmd" -arch "nullARCH" "$dst/${d_arch2##*/}" "$f2"
+      done
+    ;;
+    *.sfs) 
+      f2="$dst/${f##*/}"
+      if test -e "$f2";then
+        if test "$(sfs_stamp "$f2")" -ge "$(sfs_stamp "$f")";then echo "${f##*/} is already up to date">&2;else $cp_cmd "$dst" "$f"; fi
+      else $cp_cmd "$dst" "$f";fi;;
+    *) $cp_cmd "$dst" "$f";;
+  esac
+  case "$f" in 
+    */kernel-$kver.sfs)
+      case "$f" in
+        */$arch/*.sfs) ;;
+        *)
+          d_kern="${f%/*}"
+          for f_name in vmlinuz-$kver ramdisk-$kver ramdisk_net-$kver;do
+            test ! -e "$d_kern/$f_name" || $cp_cmd "$dst" "$d_kern/$f_name"
+          done
+        ;;
+      esac
+    ;;
+  esac
+}
+
+is_up_to_date() {
+  local dst="$1" f="$2" msg="$3"
+  test ! -d "$dst" || dst="$dst/${f##*/}"
+  test -f "$dst" || return 1
+  case "$f" in
+    *.sfs)
+      if test "$(sfs_stamp "$dst")" -lt "$(sfs_stamp "$f")";then
+        return 1
+      else
+        test -z "$msg" || echo "$msg" >&2
+        return 0
+      fi
+    ;;
+    *) return 1;;
+  esac
+}
+
+aufs_si() {
+  local esc_name="$(echo -n "$1" | sed -e 's/ /\\\\040/g')" si
+  if si="$(grep "^[^ ]* $esc_name " /proc/mounts | tail -1 | grep -o 'si=[^,[:space:]]\+')";then echo "${si#si=}"
+  else return 1;fi
+}
+
+aufs_parts() {
+  local si="$1"
+  test -e "/sys/fs/aufs/si_$si" -o ! -d "$si" || si="$(aufs_si "$1")" || return 1
+  find "/sys/fs/aufs/si_$si" -name "br[0-9]*" -exec cat {} + | sed -e 's/=r.$//'
+}
+
+file2mnt() {
+  local fname="$1" blkid up
+  while test -n "$fname";do
+    case "$fname" in
+      /) echo "/"; return;;
+      /*/*) up="${fname%/*}";;
+      /*) up="/";;
+      *) file2mnt "$(readlink -f "$fname")"; return;;
+    esac
+    test -n "$blkid" || {
+      if test -L "$1" -o -e "$1";then blkid="$(stat -c %d "$1")"
+      else blkid="$(stat -c %d "${1%/*}")";fi
+    }
+    test "$(stat -c %d "$up")" = "$blkid" || {
+      echo "$fname"
+      break
+    }
+    fname="$up"
+  done
+}
+
+file2dev() {
+  local fname="$(readlink -f "$1")" mnt si blk
+  mnt="$(file2mnt "$fname")"
+  if si="$(aufs_si "$mnt")";then
+    for part in $(aufs_parts "$si");do
+      test ! -e "$part/$fname" || file2dev "$part/$fname"
+    done
+  else
+    blk="$(grep -x -l "$(mountpoint -d "$mnt")" /sys/class/block/*/dev)" || return 1
+    blk="${blk%/dev}"
+    case "$blk" in
+      */loop[0-9]*) cat "$blk/loop/backing_file";;
+      *) echo "/dev/${blk##*/}" ;;
+    esac
+  fi
+}
+
+copy_current_sfs() {
+  local cp_cmd="copy_verbose" d f arch2 dst
+  test "x$1" != "x-s" || { cp_cmd="ln -st" ; shift ; }
+  test "x$1" != "x-cmd" || { cp_cmd="$2" ; shift 2 ; }
+  dst="$1"
+  test -n "$dst" || { echo "Usage: $FUNCNAME [-s] [-cmd <copy_cmd>] <dest_dir>" >&2; return 1; }
+  for f in $(cat /sys/block/loop*/loop/backing_file);do
+    copy_related_files -cmd "$cp_cmd" "$dst" "$f"
+  done
+}
+
+copy_verbose() {
+  local dst="$1" f s
+  shift
+  if test -x "$(which bar)";then
+    for f in "$@";do
+      if test -f "$f";then s="$(stat -Lc %s "$f")";else s="";fi
+      bar -ns -if "$f" -of "$dst/${f##*/}" -ti "${f##*/}" ${s:+-s $s}
+    done
+  else
+    cp -vt "$dst" "$@"
+  fi
+}
+
+blockdev_list() {
+  awk  '/^ *[0-9]/{print $4}' /proc/partitions
+}
+
+mnt2dev() {
+  local esc_name="$(echo -n "$(readlink -f "$1")" | sed -e 's/ /\\\\040/g')" devname pos="${2:-1}"
+  devname="$(grep "^[^ ]* $esc_name " /proc/mounts | tail -1 | cut -f$pos -d" ")"
+  if test -n "$devname"; then echo "$devname"; else return 1;fi
+}
+
+part2disk() {
+  local d dev="${1##*/}"
+  for d in /sys/block/*;do
+    test ! -e "$d/$dev/partition" || { echo "${d##*/}"; return 0; }
+  done
+  return 1
+}
+
+run_as_root() {
+  test "$(id -u)" = "0" || exec sudo "$0" "$@"
+}
+
+parts_sfslist() {
+  local loop_dev parts_list
+  if test -z "$1";then parts_list="$(echo /.parts/*)" ; else parts_list="$*";fi
+  for loop_dev in $(grep -E "/dev/loop.* ($(echo "$parts_list" | tr ' ' '|')) " /proc/mounts  | cut -f1 -d" ");do
+    losetup $loop_dev | grep -o '([^)]*.sfs' | cut -c2-
+  done
+}
+
+blkid2mnt() {
+  local a b c blkid="$1"
+  while read a b c;do
+    if test -e "$a";then
+      test "$blkid" != "$(mountpoint -x "$a")" || { echo "$b" | sed -e 's/\\040/ /g'; return 0; }
+    fi
+  done < /proc/mounts
+  return 1
+}
+
+has_part_lbl() {
+  local devname="$1" label="$2" d part
+  for d in /sys/block/$devname/*/partition;do
+    test -e "$d" || break
+    part=${d%/partition}
+    part=${part##*/}
+    if test "x$label" = "x$(blkid -o value -s LABEL /dev/$part)";then
+      return 0
+    fi
+  done
+  return 1
+}
+
+unmount_below() {
+  local mnt="$(readlink -f "$1")" ret=0 d
+  echo -n "unmount $1/*: " >&2
+  for d in $(cut -f2 -d" " /proc/mounts | tac);do
+    d="$(echo "$d" | sed -e 's/\\040/ /g')"
+    case "$d" in
+      "$mnt"/*) 
+        echo -n "${d#$mnt}.. " >&2
+        as_root umount "$d" || ret=1
+      ;;
+    esac
+  done
+  echo "done." >&2
+  return $ret
+}
+
+mount_bind() {
+  local src="$1" dst="$2"
+  test ! -d "$src" -o ! -d "$dst" -o "$src" -ef "$dst" ||
+    as_root mount --bind "$src" "$dst"
+}
+
+enter_chroot() {
+  local unshare retval=0 mods d x lsof_out
+  while true;do
+    case "$1" in
+      -*) unshare="${unshare:+$unshare }$1"; shift ;;
+      *) break;;
+    esac
+  done
+  local dst="$1"
+  shift
+  test -n "$1" || set -- bash
+
+  mods="/lib/modules/`uname -r`"
+  for d in /proc /sys /dev/pts /dev/net /var/cache/apt /var/lib/apt/lists "$mods" "$(readlink -f "$mods/build")" "$(readlink -f "$mods/source")" "$(readlink -f "$mods/build/scripts/..")"; do
+    mount_bind "$d" "$dst$d"
+  done
+
+  while true;do
+    retval=0
+    as_root ${unshare:+unshare $unshare -- } env - debian_chroot="${debian_chroot:-${dst##*/}}" TERM="$TERM" PATH="/sbin:/usr/sbin:$PATH" HOME=/root DISPLAY="$DISPLAY" chroot "$dst" "$@" || retval=1
+    lsof_out="$(as_root lsof -w +d "$dst" || true)"
+    test -n "$lsof_out" || break
+    echo "$lsof_out" >&2
+    echo -n "Dangling processes, re-enter [Y/n]? " >&2
+    read x
+    case "$x" in ""|y*|Y*) ;; *) break;; esac
+  done
+  test -z "$lsof_out" || {
+    echo -n "Unmount [y/N]? " >&2
+    read x
+    case "$x" in y*|Y*) lsof_out="";; esac
+  }
+
+  test -n "$lsof_out" || unmount_below "$dst" || true
+  return $retval
+}
+
+mount_auto() {
+  local src="$1" mnt="$2"
+  if test -f "$src";then
+    mount -o loop,ro "$src" "$mnt"
+  elif test -d "$src";then
+    mount --bind "$src" "$mnt"
+  elif test -b "$src";then
+    mount -o ro "$src" "$mnt"
+  else
+    echo "Don't know how to mount '$src'" >&2
+    echo "Usage: $FUNCNAME <src> <mnt>" >&2
+    return 1
+  fi
+}
+
+mount_combined() {
+  local top="$1" src name dirs
+  test -n "$top" || {
+    echo "Usage: $FUNCNAME <mnt_top> <parts..>" >&2
+    return 1
+  }
+  shift 1
+  mkdir -p "$top/ALL" "$top/RW"
+  mount -t tmpfs -o mode=0755 mem "$top/RW"
+  for src;do
+    name="$(basename "$src" .sfs)"
+    mkdir -p "$top/$name"
+    mount_auto "$src" "$top/$name"
+    dirs="$top/$name=rr${dirs:+:$dirs}"
+  done
+  dirs="$top/RW=rw${dirs:+:$dirs}"
+  mount -t aufs -o "dirs=$dirs" all-combined "$top/ALL"
+}
+
+replace_sfs() {
+  local new="$1" old="$2" uid gid mode new_new
+  if test -e "$old";then
+    uid="$(stat -Lc %u "$old")" gid="$(stat -Lc %g "$old")" mode="$(stat -Lc %a "$old")"
+    chown "$uid" "$new" || true
+    chgrp "$gid" "$new" || true
+    chmod "$mode" "$new" || true
+    if test -L "$old";then
+      new_new="$old.$(sfs_stamp "$new")"
+      mv -v "$new" "$new_new"
+      mv -v "$old" "$old.OLD.$(date +%s)"
+      ln -v -s "${new_new##*/}" "$old"
+    else
+      mv -v "$old" "$old.OLD.$(date +%s)"
+      mv -v "$new" "$old"
+    fi
+  else
+    mv -v "$new" "$old"
+  fi
+}
+
+find_apt_fullpath() {
+  local key="$1" ret=""
+  while true;do
+    case "$ret" in
+      /*) echo "$ret"; break;;
+      *)
+        ret="$(apt-config dump "$key" --format=%v%n | head -1)${ret:+/$ret}"
+        key="${key%::*}"
+      ;;
+    esac
+  done
+}
+
+rebuild_sfs() {
+  local build="$1" src="$2" out="$3" outfile x of build_tmp
+  test -d "$build" || {
+    echo "Usage: $FUNCNAME <build_dir> <orig_sfs> [<out_sfs> [<mksquashfs_opts>]]" >&2
+    return 1
+  }
+  shift 3
+
+  while true;do
+    outfile="${out:-$src.NEW.`date +%s`}"
+    case "$(mnt2dev "$(file2mnt "$outfile")" 3)" in
+      cifs)
+        build_tmp="$(mktemp)"
+        mksquashfs "$build" "$build_tmp" -noappend "$@";
+        mv -v "$build_tmp" "$outfile"
+      ;;
+      *) mksquashfs "$build" "$outfile" "$@";;
+    esac
+    sync
+    if unsquashfs -l "$outfile" / >/dev/null;then break;fi
+    echo -n 'Build failed!!! Press Enter to try again..' >&2
+    read x
+  done
+  chown "$(stat -c %u:%g "$(readlink -f "$src")")" "$outfile" || true
+  chmod "$(stat -c %a "$(readlink -f "$src")")" "$outfile" || true
+
+  test -z "$out" || return 0
+
+  if test -L "$src";then
+    of="${outfile%.NEW.[0-9]*}.`sfs_stamp "$outfile"`"
+    mv -i "$outfile" "$of"
+    case "$(readlink "$src")" in */*) ;; *)
+        mv -v "$src" "$src.OLD.`date +%s`"
+        ln -sv "${of##*/}" "$src"
+      ;;
+    esac
+  elif test -e "$src";then
+    mv -iv "$src" "$src.OLD.`sfs_stamp "$src"`"
+    mv -iv "$outfile" "$src"
+  fi
+}
+
+link_deep() {
+  local src="$1" dst="$2" IFS_save="$IFS" f dst_f
+  IFS="
+"
+  for f in $(find "$src" -mindepth 1 -maxdepth 1);do
+    dst_f="$dst/${f##*/}"
+    if test -e "$dst_f";then
+      if test ! -L "$dst_f" -a -d "$dst_f" -a -d "$f";then
+        link_deep "$f" "$dst_f"
+      fi
+    else
+      test -L "$dst_f" || ln -vs "$(readlink -f "$f")" "$dst"
+    fi
+  done
+  IFS="$IFS_save"
+}
+
+cat_file() {
+  test -n "$1" || { echo "Usage: cat_file <url_or_file>" >&2; return 1; }
+  case "$1" in
+    http://*|https://*|ftp://*) curl -L -f "$1";;
+    *)
+      if test -x "$(which bar)";then
+        bar -ti "${1##*/}" -s $(stat -Lc %s "$1") -if "$1"
+      else 
+        echo -n "Getting ${1##*/}.." >&2;cat "$1";echo >&2
+      fi
+    ;;
+  esac
+}
+
+dl_compile_and_install() {
+  local src="$1" prefix="$2"  dest="$3" src_name="$4"
+  local src_file src_dir src_name
+  test -n "$src_name" || {
+    src_name="${src##*/}"
+    while true; do 
+      case "$src_name" in
+       *.tar|*.gz|*.bz2|*.tbz2|*.tbz|*.xz|*.zip|*.7z) src_name="${src_name%.*}" ;;
+       *) break;;
+      esac
+    done
+  }
+  test -n "$src" -a -n "$prefix" || {
+    echo "Usage: $FUNCNAME <src=$src> <prefix=$prefix> [<dest=$dest>] [<src_name=$src_name>] [configure_args..]" >&2
+    return 1
+  }
+  if test "$#" -gt 4 ;then shift 4 ; else shift $#;fi
+  if test -d "$src";then src_dir="$src"
+  else src_dir="${src_name}-src"
+  fi
+  test -d "$src_dir" || {
+    case "$src" in
+      http://*|https://*|ftp://*)
+        local src_file="${src##*/}"
+        test -e "$src_file" || wget -O "$src_file" "$src" || return 1
+        src="$(readlink -f "$src_file")"
+      ;;
+    esac
+    mkdir -p "$src_dir"
+    case "$src" in 
+      *.tar.gz|*.tgz) gzip -dc <"$src" | (cd "$src_dir"; tar xv --strip-components=1) || return 1;;
+      *.tar.bz2|*.tbz2|*.tbz) bzip2 -dc <"$src" | (cd "$src_dir"; tar xv --strip-components=1) || return 1;;
+      *.tar.xz) xz -dc <"$src" | (cd "$src_dir"; tar xv --strip-components=1) || return 1;;
+      *.zip) unzip "$src" -d "$src_dir" || return 1;;
+      *.7z) 7z -o"$src_dir" "$src" || return 1;;
+    esac
+  }
+  local inst_dest="$(mktemp -d /tmp/inst-${src_name}.XXXXXX)"
+  if test -e "$src_dir/bootstrap.sh" -a ! -x "$src_dir/configure";then
+    (cd "$src_dir" ; sh bootstrap.sh ) || return 1
+  fi
+  if test -x "$src_dir"/configure;then
+    (
+      cd "$src_dir"
+      LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" ./configure --prefix="$prefix" "$@" $configure_args && make && make install DESTDIR="$inst_dest"
+    ) || return 1
+  elif test -e "$src_dir"/setup.py;then
+    (
+      cd "$src_dir"
+      LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" python setup.py install --prefix="$prefix" --root="$inst_dest" "$@" $setup_args
+    ) || return 1
+  else
+    echo "Don't know how to compile $src_dir" >&2
+    rm -r "$inst_dest"
+    return 1
+  fi
+  echo "As root: (cd $inst_dest ; find * | cpio -pv --owner=0:0 \"${dest:-\$DESTDIR}\") && rm -r $inst_dest" >&2
+  test -z "$dest" || {
+    (cd "$inst_dest" ; find * | as_root cpio -pv --owner=0:0 "$dest") && rm -r "$inst_dest"
+  }
+}
+
+if test -n "$DISPLAY" && xlsclients >/dev/null && test -x "$(which zenity)";then
+  show_info() { zenity --info --text="$1"; }
+  ask_yesno() { zenity --question --text="$1" ; }
+  ask_text() { zenity --entry --text="$1"; }
+  confirm_text() {
+    local msg="$1" need="$2"
+    answ="$(ask_text "$msg. Enter [$need] to confirm.")"
+    if test "x$need" = "x$answ"; then return 0; else show_info "Aborted"; return 1;fi
+  }
+  select_one() {
+    local msg="$1" x extra_cols
+    shift
+    while test "x$1" = "x-c";do
+      extra_cols="${extra_cols:+$extra_cols }--column $2"
+      shift 2
+    done
+    for x;do echo "$x" ; done | zenity --list --text="$msg" --column Select $extra_cols
+  }
+else
+  tty -s || echo "$0: Warning: X11 failed, input is not terminal, UI input might fail" >&2
+  show_info() { 
+    local answ
+    echo "$1" >&2
+    echo -n "Press Enter to continue." >&2
+    read answ
+  }
+  ask_yesno() {
+    local msg="$1" answ
+    echo -n "$msg? [y/n] " >&2
+    read answ
+    case "$answ" in Y*|y*) return 0;; *) return 1;; esac
+  }
+  ask_text() {
+    local msg="$1" answ
+    echo "$msg" >&2
+    echo -n "> " >&2
+    read answ || return 1
+    echo "$answ"
+  }
+  confirm_text() {
+    local msg="$1" need="$2" answ
+    echo "$msg" >&2
+    echo -n "Enter [$need] to confirm: " >&2
+    read answ
+    if test "x$need" = "x$answ"; then return 0; else show_info "Aborted"; return 1;fi
+  }
+  select_one() {
+    local msg="$1" x colcount=1 i=0 answ
+    shift
+    while test "x$1" = "x-c";do
+      colcount="$((colcount+1))"
+      extra_cols="${extra_cols:+$extra_cols }--column $2"
+      shift 2
+    done
+    echo "Select 1 from:" >&2
+    for x;do
+      echo -n "$x" >&2
+      i="$(($i+1))"
+      if test "$(($i%$colcount))" = "0";then
+        echo >&2
+      else
+        echo -n " " >&2
+      fi
+    done
+    echo -n "> " >&2
+    read answ || return 1
+    echo "$answ"
+  }
+fi

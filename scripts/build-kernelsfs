@@ -1,0 +1,58 @@
+#!/bin/sh -e
+
+dst="$1"
+kver="${2:-$(uname -r)}"
+
+test -n "$dst" || {
+  echo "Usage: $0 <destfile.sfs> [kver=$kver]"
+  exit 1
+}
+
+test -e "/lib/modules/$kver" || {
+  echo "Kernel version $kver is not readable at /lib/modules/$kver"
+  exit 1
+}
+
+on_exit() {
+  echo -n "Cleaning up $workdir.."
+  cut -f2 -d" " /proc/mounts | tac | grep "^$workdir/" | xargs umount
+  rm "$workdir/boot"/*
+  files_left="$(find "$workdir" -type f)"
+  if test -n "$files_left";then
+   echo "Files left?: $files_left" >&2
+   exit 1
+  else
+    rm -r "$workdir"
+    echo "Done."
+  fi
+}
+
+workdir="$(mktemp -d)"
+chmod 755 "$workdir"
+echo "Working at: $workdir"
+
+trap on_exit EXIT
+
+hdr_dir=/usr/src/linux-headers-$kver
+more_dirs=""
+
+test ! -d "${hdr_dir%-*}-common" || more_dirs="${hdr_dir%-*}-common"
+for d in tools scripts;do
+  test -L "$hdr_dir/$d" || continue
+  more_dirs="${more_dirs:+$more_dirs }$(dirname $(readlink -f "$hdr_dir/$d"))"
+done
+
+echo "Bind-mounting:"
+for bind_dir in  /lib/modules/$kver /lib/firmware/$kver $hdr_dir $more_dirs;do
+  test -d "$bind_dir" || continue
+  echo "  $bind_dir"
+  mkdir -p "$workdir$bind_dir"
+  mount --bind "$bind_dir" "$workdir$bind_dir"
+done
+echo "Ok."
+
+mkdir -p "$workdir/boot"
+ln /boot/*$kver* "$workdir/boot/"
+
+time mksquashfs "$workdir" "$dst" -all-root -noappend
+

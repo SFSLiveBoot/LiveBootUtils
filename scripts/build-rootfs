@@ -1,0 +1,40 @@
+#!/bin/sh
+
+set -e
+
+outfile_fin="$1"
+src="${2:-/}"
+
+
+sfs_stamp() {
+  date --date="$(unsquashfs -s "$1" | grep -o "time .*" | cut -f2- -d" ")" +%s
+}
+
+test -n "$outfile_fin" || {
+  echo "Usage: ${0##*/} <outfile> [<src=$src>]" >&2
+  exit 1
+}
+
+outfile="$outfile_fin.NEW.`date +%s`"
+
+workdir="$(mktemp -d /tmp/build-root.XXXXXX)"
+chmod 755 "$workdir"
+exclude_file="$(dirname "$0")/rootfs.exclude"
+mount --bind "$src" "$workdir"
+trap "umount $workdir;rmdir $workdir" EXIT
+
+mksquashfs "$workdir" "$outfile" -noappend -wildcards -ef "$exclude_file"
+chmod go+r "$outfile"
+
+if test -L "$outfile_fin";then
+  of="${outfile%.NEW.[0-9]*}.`sfs_stamp "$outfile"`"
+  mv -i "$outfile" "$of"
+  orig="$(readlink -f "$outfile_fin")"
+  if test "$(dirname "$orig")" = "$(dirname "$outfile_fin")";then
+    rm -v "$outfile_fin"
+    ln -sv "${of##*/}" "$outfile_fin"
+  fi
+else
+  test ! -e "$outfile_fin" || mv -v "$outfile_fin" "$outfile_fin.OLD.`sfs_stamp "$outfile_fin"`"
+  mv -v "$outfile" "$outfile_fin"
+fi

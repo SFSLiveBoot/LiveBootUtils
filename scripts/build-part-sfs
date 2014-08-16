@@ -1,0 +1,37 @@
+#!/bin/sh -e
+
+dst="$1"
+
+
+test -n "$dst" || {
+  echo "Usage: $0 <dst.sfs> <files and dirs..>"
+  exit 1
+}
+
+shift
+
+workdir="$(mktemp -d)"
+
+for tgt;do
+  if test -d "$tgt";then
+    mkdir -p "$workdir/$tgt"
+    mount --bind "$tgt" "$workdir/$tgt"
+  else
+    tgt_dir="$(dirname "$tgt")"
+    mkdir -p "$workdir/$tgt_dir"
+    ln "$tgt" "$workdir/$tgt_dir"
+  fi
+done
+
+chmod 755 "$workdir"
+time mksquashfs "$workdir" "$dst" -all-root -noappend
+
+for tgt;do
+  if test -d "$tgt";then
+    umount "$workdir/$tgt"
+  else
+    rm "$workdir/$tgt"
+  fi
+done
+
+find "$workdir" -depth -type d -exec rmdir -v {} \;
