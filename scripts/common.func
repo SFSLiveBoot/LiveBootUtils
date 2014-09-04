@@ -490,7 +490,7 @@ cat_file() {
     http://*|https://*|ftp://*) curl -L -f "$1";;
     *)
       if test -x "$(which bar)";then
-        bar -ti "${1##*/}" -s $(stat -Lc %s "$1") -if "$1"
+        bar -ns -ti "${1##*/}" -s $(stat -Lc %s "$1") -if "$1"
       else 
         echo -n "Getting ${1##*/}.." >&2;cat "$1";echo >&2
       fi
