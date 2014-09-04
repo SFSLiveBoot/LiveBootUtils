@@ -2,7 +2,10 @@
 
 exit_trap() { show_info "$1"; exit $2; }
 trap_fail() { trap 'exit_trap "$0: execution failed." 1' EXIT; set -e; }
-exit_succ() { trap 'exit_trap "$0: Success." 0' EXIT; }
+exit_succ() {
+  if test -n "$SILENT_EXIT";then trap - EXIT
+  else trap 'exit_trap "$0: Success." 0' EXIT; fi
+}
 
 grub_cfg_gfx() {
   local ldn="$1" wd="$2" d
