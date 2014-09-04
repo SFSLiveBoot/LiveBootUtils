@@ -567,6 +567,7 @@ if test -n "$DISPLAY" && xlsclients >/dev/null && test -x "$(which zenity)";then
   show_info() { zenity --info --text="$1"; }
   ask_yesno() { zenity --question --text="$1" ; }
   ask_text() { zenity --entry --text="$1"; }
+  ask_passwd() { zenity --password --title="$1"; }
   confirm_text() {
     local msg="$1" need="$2"
     answ="$(ask_text "$msg. Enter [$need] to confirm.")"
@@ -583,6 +584,13 @@ if test -n "$DISPLAY" && xlsclients >/dev/null && test -x "$(which zenity)";then
   }
 else
   tty -s || echo "$0: Warning: X11 failed, input is not terminal, UI input might fail" >&2
+  ask_passwd() {
+    local _st
+    stty -echo >&2
+    ask_text "$@" ; _st="$?"
+    stty echo >&2
+    return $_st
+  }
   show_info() { 
     local answ
     echo "$1" >&2
