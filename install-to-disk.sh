@@ -171,7 +171,7 @@ install_grub_efi() {
   }
   mkdir -p "$efi_dir"
   grub-mkimage -o "$efi_dir/$efi_image" -O "$efi_arch" -p "/boot/$efi_arch" $efi_mods
-  boot_dir="$(find "$tgt" -maxdepth 1 -type d -iname "boot")"
+  boot_dir="$(find "$tgt" -mindepth 1 -maxdepth 1 -type d -iname "boot")"
   test -n "$boot_dir" || { boot_dir="$tgt/boot" ; mkdir -p "$boot_dir"; }
   cp -r "/usr/lib/grub/$efi_arch" "$boot_dir"
   echo "source /boot/grub/grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
