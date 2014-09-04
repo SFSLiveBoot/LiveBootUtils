@@ -11,6 +11,11 @@ set -e
 trap_fail
 
 for sfs;do
+  test ! -d "$sfs" || {
+    sfs_files="$(find "$sfs" -type f -name "*.sfs")"
+    test -z "$sfs_files" || SILENT_EXIT=1 "$0" $sfs_files
+    continue
+  }
   test ! -L "$sfs" || {
     echo "$sfs is already a link, skipping."
     continue
