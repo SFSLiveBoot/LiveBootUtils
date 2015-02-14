@@ -24,8 +24,15 @@ chmod 755 $wd
 
 mount_combined "$wd" "$src"
 
-echo "Apply your modifications and type 'exit 0' to build or 'exit 1' to cancel."
-echo "DESTDIR=$wd/ALL"
-if ( cd "$wd/ALL" ; env DESTDIR="$wd/ALL" bash; );then
+sname="$(basename "$src" .sfs)"
+sname="${sname#[0-9][0-9]-}"
+cat <<EOF
+DESTDIR=$wd/ALL
+
+Apply your modifications and type 'exit 0' to build or 'exit 1' to cancel.
+ Use 'cp2sfs </path/file/name>..' to include files from system to sfs.
+
+EOF
+if ( cd "$wd/ALL" ; echo "alias cp2sfs='cp --parents -avt \$DESTDIR'; PS1='($sname)[\W]\\\$ '; exec <&1" | env DESTDIR="$wd/ALL" bash -i );then
   rebuild_sfs "$wd/ALL" "$src" "$ALL"
 fi

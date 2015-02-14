@@ -366,6 +366,7 @@ mount_auto() {
     mount -o loop,ro "$src" "$mnt"
   elif test -d "$src";then
     mount --bind "$src" "$mnt"
+    mount -o remount,bind,ro "$src" "$mnt"
   elif test -b "$src";then
     mount -o ro "$src" "$mnt"
   else
@@ -502,6 +503,8 @@ cat_file() {
 }
 
 dl_compile_and_install() {
+  local do_patch
+  test ! "x$1" = "x--patch" || { do_patch=1; shift ; }
   local src="$1" prefix="$2"  dest="$3" src_name="$4"
   local src_file src_dir src_name
   test -n "$src_name" || {
@@ -521,12 +524,17 @@ dl_compile_and_install() {
   if test -d "$src";then src_dir="$src"
   else src_dir="${src_name}-src"
   fi
-  test -d "$src_dir" || {
+  if test -d "$src_dir";then
+    test -z "$do_patch" || cat >/dev/null
+  else
     case "$src" in
       http://*|https://*|ftp://*)
         local src_file="${src##*/}"
         test -e "$src_file" || wget -O "$src_file" "$src" || return 1
         src="$(readlink -f "$src_file")"
+      ;;
+      git://*)
+        git clone "$src" "$src_dir"
       ;;
     esac
     mkdir -p "$src_dir"
@@ -537,10 +545,15 @@ dl_compile_and_install() {
       *.zip) unzip "$src" -d "$src_dir" || return 1;;
       *.7z) 7z -o"$src_dir" "$src" || return 1;;
     esac
-  }
+    test -z "$do_patch" || (cd "$src_dir"; patch -p1)
+  fi
   local inst_dest="$(mktemp -d /tmp/inst-${src_name}.XXXXXX)"
   if test -e "$src_dir/bootstrap.sh" -a ! -x "$src_dir/configure";then
     (cd "$src_dir" ; sh bootstrap.sh ) || return 1
+  elif test -e "$src_dir/autogen.sh" -a ! -x "$src_dir/configure";then
+    (cd "$src_dir" ; sh autogen.sh ) || return 1
+  elif test -e "$src_dir/configure.ac" -a ! -x "$src_dir/configure";then
+    (cd "$src_dir" ; autoreconf ) || return 1
   fi
   if test -x "$src_dir"/configure;then
     (
@@ -557,16 +570,16 @@ dl_compile_and_install() {
     rm -r "$inst_dest"
     return 1
   fi
-  echo "As root: (cd $inst_dest ; find * | cpio -pv --owner=0:0 \"${dest:-\$DESTDIR}\") && rm -r $inst_dest" >&2
+  echo "As root: (cd $inst_dest ; tar c --owner=root --group=root * | tar xvv -C \"${dest:-\$DESTDIR}\") && rm -r $inst_dest" >&2
   test -z "$dest" || {
-    (cd "$inst_dest" ; find * | as_root cpio -pv --owner=0:0 "$dest") && rm -r "$inst_dest"
+    (cd "$inst_dest" ; tar c --owner=root --group=root * | as_root tar xvv -C "$dest") && rm -r "$inst_dest"
   }
 }
 
 if test -n "$DISPLAY" && xlsclients >/dev/null && test -x "$(which zenity)";then
   show_info() { zenity --info --text="$1"; }
   ask_yesno() { zenity --question --text="$1" ; }
-  ask_text() { zenity --entry --text="$1"; }
+  ask_text() { zenity --entry --text="$1" ${2:+--entry-text="$2"}; }
   ask_passwd() { zenity --password --title="$1"; }
   confirm_text() {
     local msg="$1" need="$2"
@@ -604,11 +617,11 @@ else
     case "$answ" in Y*|y*) return 0;; *) return 1;; esac
   }
   ask_text() {
-    local msg="$1" answ
-    echo "$msg" >&2
+    local msg="$1" def="$2" answ
+    echo "$msg${def:+ [default: $def]}" >&2
     echo -n "> " >&2
     read answ || return 1
-    echo "$answ"
+    echo "${answ:-$def}"
   }
   confirm_text() {
     local msg="$1" need="$2" answ

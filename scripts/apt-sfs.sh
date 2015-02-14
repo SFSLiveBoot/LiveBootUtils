@@ -17,15 +17,15 @@ shift
 
 if test -n "$DESTDIR";then
   sfs_src="$DESTDIR"
-  mkdir -p "$sfs_src/var/lib/dpkg/info"
   keep_dirs=yes
-else
-  test -n "$show_only" ||  {
-    sfs_src="$(mktemp -d /tmp/apt-sfs-src.XXXXXX)"
-    chmod 755 "$sfs_src"
-    mkdir -p "$sfs_src/var/lib/dpkg/info"
-  }
+elif test -z "$show_only";then
+  sfs_src="$(mktemp -d /tmp/apt-sfs-src.XXXXXX)"
+  chmod 755 "$sfs_src"
 fi
+
+: ${info_d:=$sfs_src/var/lib/dpkg/info}
+
+test -n "$show_only" || mkdir -p "$info_d"
 
 cache_dir="$(find_apt_fullpath "Dir::Cache::archives")"
 
@@ -33,23 +33,32 @@ apt-get download --print-uris $(apt-get install -s "$@" | grep ^Inst | cut -f2 -
   test -z "$exclude_fnpat" || if echo "$fname" | grep -Eq "$exclude_fnpat";then continue; fi
   url="${url#'}"
   url="${url%'}"
-  echo -n "File $fname ($url) .."
+  echo -n "${fname%%_*} = $url .. "
   test -z "$show_only" || { echo; continue; }
   case "$url" in
-    file:///*) dpkg-deb -x "${url#file://}" "$sfs_src";;
+    file:///*) deb_file="${url#file://}" ;;
     http://*|ftp://*)
-      test -e "$cache_dir/$fname" || curl -o "$cache_dir/$fname" "$url"
-      dpkg-deb -x "$cache_dir/$fname" "$sfs_src"
-      pkg_name="$(dpkg-deb -f "$cache_dir/$fname" Package)"
-      case "$(dpkg-deb -f "$cache_dir/$fname" Multi-Arch)" in
-        same) pkg_arch="$(dpkg-deb -f "$cache_dir/$fname" Architecture)" ;;
-        *) pkg_arch="";;
-      esac
-      
-      dpkg-deb --fsys-tarfile "$cache_dir/$fname" | tar t | sed -e 's@^./@/@' -e 's@^/$@/.@' -e 's@/$@@' >"$sfs_src/var/lib/dpkg/info/${pkg_name}${pkg_arch:+:$pkg_arch}.list"
+      test -s "$cache_dir/$fname" || {
+        touch "$cache_dir/$fname"
+        curl -L -o "$cache_dir/partial/$fname" "$url"
+        mv "$cache_dir/partial/$fname"  "$cache_dir/$fname"
+      }
+      deb_file="$cache_dir/$fname"
     ;;
     *) echo "Unknown url: $url" >&2 ; false ;;
   esac
+  dpkg-deb -x "$deb_file" "$sfs_src"
+  pkg_name="$(dpkg-deb -f "$deb_file" Package)"
+  test ! "x$(dpkg-deb -f "$deb_file" Multi-Arch)" = "xsame" ||
+    pkg_name="$pkg_name:$(dpkg-deb -f "$deb_file" Architecture)"
+
+  dpkg-deb --fsys-tarfile "$deb_file" | tar t | sed -e 's@^./@/@' -e 's@^/$@/.@' -e 's@/$@@' >"$info_d/${pkg_name}.list"
+  ctrl_tmp="$(mktemp -d)"
+  dpkg-deb -e "$deb_file" "$ctrl_tmp"
+  for f in "$ctrl_tmp"/*;do
+    mv "$f" "$info_d/$pkg_name.${f##*/}"
+  done
+  rmdir "$ctrl_tmp"
   echo "ok."
 done
 

@@ -1,7 +1,16 @@
 #!/bin/sh -e
 
 src="${1%%/}"
-dst="${2:-$PWD}"
+
+test -n "$src" || {
+  echo "Usage: $(basename "$0") <src>=$src [<dstdirs..>=$*]" >&2
+  echo " dstdirs defaults to $PWD" >&2
+  exit 1
+}
+
+shift
+
+test -n "$1" || set -- "$PWD"
 
 sfs_stamp_file() {
   if test -e "$1" && stamp="$(unsquashfs -s "$1" | grep time | cut -f7- -d" ")";then
@@ -32,7 +41,7 @@ get() {
     http://*|https://*|ftp://*) curl -f "$1";;
     *)
       if test -x "$(which bar)";then
-        bar -ti "${1##*/}" -s $(stat -Lc %s "$1") -if "$1"
+        bar -ns -ti "${1##*/}" -s $(stat -Lc %s "$1") -if "$1"
       else 
         echo -n "Copying.." >&2;cat "$1";echo >&2
       fi
@@ -40,27 +49,19 @@ get() {
   esac
 }
 
-usage() {
-  test -z "$1" || echo "$1" >&2
-  echo "Usage: $(basename "$0") <src>=$src [<dst>=$dst]" >&2
-  exit 1
-}
-
-echo "Using source: $src"
-
 : ${find_maxdepth:=3}
 
 IFS_save="$IFS"
 IFS="
 "
-for sfs in $(find "$dst" -maxdepth $find_maxdepth -name "*.sfs"); do
+for sfs in $(find "$@" -maxdepth $find_maxdepth -name "*.sfs"); do
   if test -L "$sfs";then
     sfs_target="$(readlink "$sfs")"
     case "$sfs_target" in
       */*) echo "Skipping $sfs: symlink target in different directory ($sfs_target)" >&2; continue;;
     esac
   fi
-  test -e "$sfs" || usage "$sfs does not exist"
+  test -e "$sfs" || { echo "$sfs does not exist, skipping"; continue; }
   sfs_bn="$(basename "$sfs")"
   case "$sfs_bn" in
     [0-9][0-9]-*) sfs_num="${sfs_bn%%-*}" sfs_bn="${sfs_bn#[0-9][0-9]-}" ;;
@@ -118,5 +119,3 @@ for sfs in $(find "$dst" -maxdepth $find_maxdepth -name "*.sfs"); do
     echo "WARN: Could not read: $src_sfs" >&2
   fi
 done
-
-test -n "$has_src" || usage "Source path wrong?"

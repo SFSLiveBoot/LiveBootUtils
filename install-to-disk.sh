@@ -70,7 +70,7 @@ copy_root_parts() {
   for root_part_br in /sys/fs/aufs/si_${root_aufs_si}/br[0-9]*; do
     read part_mnt <"$root_part_br"
     part_mnt="${part_mnt%=*}"
-    part_dev="$(mnt2dev "$part_mnt")"
+    part_dev="$(mnt2dev "$part_mnt")" || continue
     case "$part_dev" in
       /dev/loop*) part_dev="${part_dev#/dev/}";;
       *) continue;;
@@ -194,6 +194,7 @@ set kver="$kver"
 set arch="$arch"
 set root_uuid="$tgt_uuid"
 set storage_uuid="$storage_uuid"
+$(case "$(cat /sys/class/dmi/id/product_name)" in "Latitude E6520") echo "set append=\"reboot=pci\"";;esac)
 EOF
 cat >"$tgt/$dist/grub.cfg" <<EOF
 
@@ -271,5 +272,5 @@ install_grub "$tgt" "$dst_disk"
 copy_root_parts "$tgt/$dist"
 create_grub_cfg "$tgt" "$dist"
 
-test -z "$tmp_tgt" || { umount "$tgt"; rmdir "$tgt"; }
+test -z "$tmp_tgt" || { echo -n "Unmounting $tgt.. "; umount "$tgt"; echo "Done."; rmdir "$tgt"; }
 exit_succ
