@@ -1,6 +1,8 @@
 #!/bin/sh
 
-. "$(dirname "$0")/scripts/common.func"
+: ${wd:=$(dirname "$0")}
+
+. "$wd/scripts/common.func"
 run_as_root "$@"
 
 trap_fail
@@ -53,13 +55,15 @@ if test -z "$dist";then
     dist="${dist##*/}"
   }
 fi
-: ${dist:=cdilive}
+: ${dist:=live}
 
 : ${kver:=`uname -r`}
 : ${arch:=`uname -m`}
 
-mkdir -p "$tgt/$dist" "$tgt/boot/grub"
-echo "source /$dist/grub.cfg" > "$tgt/boot/grub/grub.cfg"
+no_act() {
+  if test -n "$no_act";then echo "No-act: $1" >&2
+  else return 1;fi
+}
 
 copy_root_parts() {
   local root_aufs_si="$(grep " / aufs " /proc/mounts | grep -o si=[0-9a-f]* | cut -f2 -d=)"
@@ -90,11 +94,16 @@ copy_root_parts() {
       fi
     }
     part_sfs="${part_file##*/}"
+    part_name="${part_sfs%.sfs*}"
+    part_name="${part_name#[0-9][0-9]-}"
     test -z "$exclude_sfs" || {
       is_excluded=""
-      for exclude_test in $exclude_sfs; do case "$part_file" in $exclude_test) is_excluded=1; break;; esac;done
+      for exclude_test in $exclude_sfs; do
+        case "$part_name" in $exclude_test) is_excluded=1; break;; esac
+        case "$part_file" in $exclude_test) is_excluded=1; break;; esac
+      done
       test -z "$is_excluded" || { 
-        echo "Skipping excluded file: '$part_file'" >&2
+        echo "Skipping excluded sfs: '$part_name'" >&2
         continue
       }
     }
@@ -106,8 +115,8 @@ copy_root_parts() {
         test ! -e "$part_file_t" || part_file="${part_file_t}"
       ;;
     esac
-    test -e "$dst/font.pf2" || cp -v /usr/share/grub/ascii.pf2 "$dst/font.pf2"
     test ! -e "$part_srcdir/logo.png" -o -e "$dst/logo.png" ||
+      no_act "Copying logo from $part_srcdir" ||
       cp -v "$part_srcdir/logo.png" "$dst/logo.png"
     case "$part_sfs" in
       *"$kver"*)
@@ -124,15 +133,16 @@ copy_root_parts() {
           esac
         fi;;
     esac
-    mkdir -p "$dst${part_dstdir:+/$part_dstdir}"
+    test -d "$dst${part_dstdir:+/$part_dstdir}" || no_act "Creating $dst/$part_dstdir" || mkdir -p "$dst${part_dstdir:+/$part_dstdir}"
     part_dst="$dst${part_dstdir:+/$part_dstdir}/$part_sfs"
     test -e "$part_dst" &&
       test "$(sfs_stamp "$part_dst")" -ge "$(sfs_stamp "$part_file")" &&
-      echo "Newer or same version $part_dst already exists." || {
+      echo "Newer or same version $part_dst ($(date --date=@$(sfs_stamp "$part_dst") +%y%m%d_%H%M%S)) already exists." || no_act "Copying $part_file" || {
         cat_file "$part_file" >"${part_dst}.NEW.$$"
         replace_sfs "${part_dst}.NEW.$$" "$part_dst" 
       }
   done
+  if no_act "Installing kernel kver=$kver";then return 0; fi
   test -e "$kernel_dst" -o -n "$kernel" -o ! -r "/boot/vmlinuz-$kver" || kernel="/boot/vmlinuz-$kver"
   test -e "$kernel_dst" -o -z "$kernel" || {
     cp -v "$kernel" "$dst/$arch/"
@@ -174,103 +184,36 @@ install_grub_efi() {
   boot_dir="$(find "$tgt" -mindepth 1 -maxdepth 1 -type d -iname "boot")"
   test -n "$boot_dir" || { boot_dir="$tgt/boot" ; mkdir -p "$boot_dir"; }
   cp -r "/usr/lib/grub/$efi_arch" "$boot_dir"
-  echo "source /boot/grub/grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
+  echo "source /grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
 }
 
 install_grub() {
   local tgt="$1" dst_disk="$2"
   echo -n "installing grub to ${dst_disk}.. "
   grub-install --boot-directory="$tgt/boot" "$dst_disk"
+  cp /usr/share/grub/ascii.pf2 "$tgt/boot/grub"
+  echo "source /grub.cfg" > "$tgt/boot/grub/grub.cfg"
   install_grub_efi "$tgt"
 }
 
 create_grub_cfg() {
-  local tgt="$1" dist="$2"
-  cat >"$tgt/$dist/grubvars.cfg" <<EOF
-# change as needed
-
+  local tgt="$1" dist="$2" dq='"'
+  cat >"$tgt/grubvars.cfg" <<EOF
 set dist="$dist"
 set kver="$kver"
 set arch="$arch"
 set root_uuid="$tgt_uuid"
 set storage_uuid="$storage_uuid"
 $(case "$(cat /sys/class/dmi/id/product_name)" in "Latitude E6520") echo "set append=\"reboot=pci\"";;esac)
+${part_dirlist:+set extras=$dq$part_dirlist$dq}
 EOF
-cat >"$tgt/$dist/grub.cfg" <<EOF
-
-# kernel version etc. variables
-source /$dist/grubvars.cfg
-
-set timeout=5
-
-if test -z "\$root_uuid";then
-  probe -s root_uuid -u (\$root)
-fi
-
-if test -e /\$dist/font.pf2;then
-  insmod font
-  loadfont /\$dist/font.pf2
-  insmod vbe
-  insmod gfxterm
-  set gfxmode="800x600x16"
-  if terminal_output gfxterm;then
-    if test -e /\$dist/logo.png;then
-      insmod png
-      background_image -m stretch /\$dist/logo.png
-    elif test -e /logo.png;then
-      insmod png
-      background_image -m stretch /logo.png
-    fi
-  fi
-fi
-
-function load_lnx {
-  if test -z "\$kernel";then
-    set kernel="/\$dist/\$arch/vmlinuz-\$kver"
-  fi
-  if test -z "\$initrd";then
-    set initrd="/\$dist/\$arch/ramdisk-\$kver"
-  fi
-  echo -n "Loading \$kernel.."
-  linux \$kernel root=\$root_dev:\$dist/*.sfs+:\$dist/\\\$arch/*kernel-\\\$kver.sfs\$extra_sfs+\$storage_dev max_loop=64 \$append "\$@"
-  echo -n "\$initrd.."
-  initrd \$initrd
-  echo "ok."
+  cp "$wd/scripts/grub.cfg" "$tgt"
 }
 
-if test -n "\$storage_uuid";then
-menuentry "Boot \$kver/\$arch from UUID=\$root_uuid [Storage: UUID=\$storage_uuid]" {
-  set storage_dev="UUID=\$storage_uuid"
-  set root_dev="UUID=\$root_uuid"
-  set extra_sfs="$(for d in $part_dirlist;do echo -n "+:\$dist/$d/*.sfs";done)"
-  load_lnx quiet
-}
-fi
-
-menuentry "Boot \$kver/\$arch from UUID=\$root_uuid [mem]" {
-  set storage_dev="mem"
-  set root_dev="UUID=\$root_uuid"
-  set extra_sfs="$(for d in $part_dirlist;do echo -n "+:\$dist/$d/*.sfs";done)"
-  load_lnx quiet
-}
-
-menuentry "Boot \$kver/\$arch from UUID=\$root_uuid [light,mem]" {
-  set storage_dev="mem"
-  set root_dev="UUID=\$root_uuid"
-  load_lnx quiet
-}
-
-menuentry "Boot \$kver/\$arch from UUID=\$root_uuid [light,copy-root-to-mem]" {
-  set storage_dev="mem"
-  set root_dev="mem:UUID=\$root_uuid"
-  load_lnx quiet
-}
-EOF
-}
-
-install_grub "$tgt" "$dst_disk"
+no_act "Creating $tgt/$dist and $tgt/boot/grub" || mkdir -p "$tgt/$dist" "$tgt/boot/grub"
+no_act "Installing grub to $dst_disk" || install_grub "$tgt" "$dst_disk"
 copy_root_parts "$tgt/$dist"
-create_grub_cfg "$tgt" "$dist"
+no_act "Creating grub.cfg" || create_grub_cfg "$tgt" "$dist"
 
 test -z "$tmp_tgt" || { echo -n "Unmounting $tgt.. "; umount "$tgt"; echo "Done."; rmdir "$tgt"; }
 exit_succ
