@@ -175,8 +175,8 @@ is_up_to_date() {
 }
 
 aufs_si() {
-  local esc_name="$(echo -n "$1" | sed -e 's/ /\\\\040/g')" si
-  if si="$(grep "^[^ ]* $esc_name " /proc/mounts | tail -1 | grep -o 'si=[^,[:space:]]\+')";then echo "${si#si=}"
+  local si
+  if si="$(mnt2dev "$1" 4 | grep -o 'si=[^,[:space:]]\+')";then echo "${si#si=}"
   else return 1;fi
 }
 
@@ -184,6 +184,11 @@ aufs_parts() {
   local si="$1"
   test -e "/sys/fs/aufs/si_$si" -o ! -d "$si" || si="$(aufs_si "$1")" || return 1
   find "/sys/fs/aufs/si_$si" -name "br[0-9]*" -exec cat {} + | sed -e 's/=r.$//'
+}
+
+aufs_refresh() {
+  local mnt="${1:-/}"
+  mount -o remount,mod:$(cat /sys/fs/aufs/si_$(aufs_si "$mnt")/br0) "$mnt"
 }
 
 file2mnt() {
