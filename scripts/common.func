@@ -341,7 +341,9 @@ enter_chroot() {
   test -n "$1" || set -- bash
 
   mods="/lib/modules/`uname -r`"
-  for d in /proc /sys /dev/pts /dev/net /var/cache/apt /var/lib/apt/lists "$mods" "$(readlink -f "$mods/build")" "$(readlink -f "$mods/source")" "$(readlink -f "$mods/build/scripts/..")"; do
+  mount_bind "$(find_apt_fullpath Dir::Cache::archives)" "$dst/var/cache/apt/archives"
+  mount_bind "$(find_apt_fullpath Dir::State::lists)" "$dst/var/lib/apt/lists"
+  for d in /proc /sys /dev/pts /dev/net "$mods" "$(readlink -f "$mods/build")" "$(readlink -f "$mods/source")" "$(readlink -f "$mods/build/scripts/..")"; do
     mount_bind "$d" "$dst$d"
   done
 
