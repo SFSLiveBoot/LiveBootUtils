@@ -3,6 +3,7 @@
 . "$(dirname "$0")/scripts/common.func"
 
 run_as_root "$@"
+trap_fail
 
 drive="$1"
 
@@ -19,24 +20,26 @@ if grep -q "$drive" /proc/mounts;then
   exit 1
 fi
 
+set -x
 dd if=/dev/zero of="$drive" bs=512 count=63
 
 parted "$drive" mklabel msdos
 parted "$drive" mkpart primary fat32 2048s 100%
+parted "$drive" toggle 1 boot
 part="${drive}1"
 
-mkdosfs -n CDILiveBoot $part
+udevadm settle
+
+mkdosfs $part
 
 mnt="$(mktemp -d /tmp/liveboot.XXXXXX)"
-part_uuid=$(blkid -o value -s UUID $part)
 mount $part $mnt
 trap "show_info \"Failed. Cleaning up $mnt\";umount $mnt;rmdir $mnt" EXIT
 
 show_info "Starting to copy .sfs files, that will take a while."
-"$(dirname "$0")"/install-to-disk.sh "$mnt"
+SILENT_EXIT=1 "$(dirname "$0")"/install-to-disk.sh "$mnt"
 
 umount $mnt
 rmdir $mnt
 
-trap - EXIT
-show_info "Succeeded"
+exit_succ
