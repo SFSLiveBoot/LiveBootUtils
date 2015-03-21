@@ -29,7 +29,7 @@ test -n "$show_only" || mkdir -p "$info_d"
 
 cache_dir="$(find_apt_fullpath "Dir::Cache::archives")"
 
-apt-get download --print-uris $(apt-get install -s "$@" | grep ^Inst | cut -f2 -d" ") | while read url fname fsize fhash;do
+apt-get ${target_dist:+-t $target_dist} download --print-uris $(apt-get ${target_dist:+-t $target_dist} install -s "$@" | grep ^Inst | cut -f2 -d" ") | while read url fname fsize fhash;do
   test -z "$exclude_fnpat" || if echo "$fname" | grep -Eq "$exclude_fnpat";then continue; fi
   url="${url#'}"
   url="${url%'}"
