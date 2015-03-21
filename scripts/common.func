@@ -328,6 +328,25 @@ mount_bind() {
     as_root mount --bind "$src" "$dst"
 }
 
+rm_deb_dist() {
+  test -n "$DESTDIR" || { echo "Need \$DESTDIR to be set" >&2; return 1; }
+  local listfile
+  for listfile;do
+    tac "$f" | xargs sh -c 'for f;do test -L "$DESTDIR/$f" -o ! -d "$f" && rm -v "$DESTDIR/$f" || rmdir -v "$DESTDIR/$f";done' rm.sh
+    case "$listfile" in
+      "$DESTDIR"/*)
+        find "$(dirname "$listfile")" -mindepth 1 -maxdepth 1 -name "$(basename "$listfile" .list)" -exec rm -v {} +
+      ;;
+    esac
+  done
+}
+
+cp2sfs() {
+  test -n "$DESTDIR" || { echo "Need to have \$DESTDIR set" >&2; return 1; }
+  test -n "$1" || { echo "Usage: $FUNCNAME </path/file/name>.." >&2; return 1; }
+  cp --parents -avt "$DESTDIR" "$@"
+}
+
 enter_chroot() {
   local unshare retval=0 mods d x lsof_out
   while true;do
