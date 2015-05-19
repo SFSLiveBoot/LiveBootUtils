@@ -130,6 +130,7 @@ case "$mode" in
     cp "/usr/share/grub/ascii.pf2" "$cdrom_tmp_d/boot/grub"
     echo "source /grub.cfg" >"$cdrom_tmp_d/boot/grub/i386-pc/grub.cfg"
     echo "source /grub.cfg" >"$cdrom_tmp_d/boot/grub/x86_64-efi/grub.cfg"
+    echo "source /grub.cfg" >"$cdrom_tmp_d/boot/grub/grub.cfg"
     cat >"$cdrom_tmp_d/grubvars.cfg" <<EOF
 set dist="$dist"
 set arch="$arch"
@@ -137,10 +138,11 @@ set kernel="/boot/${kernel##*/}"
 set initrd="/boot/${initrd##*/}"
 set root_dev="$cdrom_dev"
 ${_extra_sfs:+set extra_sfs=$dq$_extra_sfs$dq}
+set no_storage_scan=1
 EOF
     ln -s "$grub_cfg_src" "$cdrom_tmp_d"
     ln -s "$initrd" "$kernel" "$cdrom_tmp_d/boot"
-    grub-mkrescue -o "$cdrom_iso" "$cdrom_tmp_d" -f -v
+    grub-mkrescue -o "$cdrom_iso" -v "$cdrom_tmp_d" -- -f
     test -n "$keep_isodir" && echo "Keeping $cdrom_tmp_d" || rm -r "$cdrom_tmp_d"
     kvm_opts="$kvm_opts -cdrom $cdrom_iso"
   ;;
