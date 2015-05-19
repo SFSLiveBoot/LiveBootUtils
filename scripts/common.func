@@ -422,23 +422,31 @@ mount_combined() {
 }
 
 replace_sfs() {
-  local new="$1" old="$2" uid gid mode new_new
-  if test -e "$old";then
-    uid="$(stat -Lc %u "$old")" gid="$(stat -Lc %g "$old")" mode="$(stat -Lc %a "$old")"
-    chown "$uid" "$new" || true
-    chgrp "$gid" "$new" || true
-    chmod "$mode" "$new" || true
-    if test -L "$old";then
-      new_new="$old.$(sfs_stamp "$new")"
-      mv -v "$new" "$new_new"
-      mv -v "$old" "$old.OLD.$(date +%s)"
-      ln -v -s "${new_new##*/}" "$old"
+  local src="$1" dst="$2" uid gid mode new_tgt
+  test ! -d "$dst" || { dst="$dst/${src##*/}"; dst="${dst%.sfs*}.sfs" ; }
+  if test -e "$dst";then
+    local src_stamp="$(sfs_stamp "$src")" dst_stamp="$(sfs_stamp "$dst")"
+    local src_dtime="$(date --date=@$src_stamp +%y%m%d_%H%M%S)"
+    local dst_dtime="$(date --date=@$dst_stamp +%y%m%d_%H%M%S)"
+    uid="$(stat -Lc %u "$dst")" gid="$(stat -Lc %g "$dst")" mode="$(stat -Lc %a "$dst")"
+    chown "$uid" "$src" || true
+    chgrp "$gid" "$src" || true
+    chmod "$mode" "$src" || true
+    if test -L "$dst";then
+      new_tgt="$dst.$src_stamp"
+      echo -n "Re-linking $dst ($dst_dtime) to ${new_tgt##*/} ($src_dtime) .. "
+      mv "$src" "$new_tgt"
+      mv "$dst" "$dst.OLD.$(date +%s)"
+      ln -s "${new_tgt##*/}" "$dst"
+      echo "Done."
     else
-      mv -v "$old" "$old.OLD.$(date +%s)"
-      mv -v "$new" "$old"
+      echo -n "Replacing $dst ($dst_dtime) with new version ($src_dtime).. "
+      mv "$dst" "$dst.OLD.$(date +%s)"
+      mv "$src" "$dst"
+      echo "Done."
     fi
   else
-    mv -v "$new" "$old"
+    mv -v "$src" "$dst"
   fi
 }
 
@@ -481,21 +489,7 @@ rebuild_sfs() {
   chown "$(stat -c %u:%g "$(readlink -f "$src")")" "$outfile" || true
   chmod "$(stat -c %a "$(readlink -f "$src")")" "$outfile" || true
 
-  test -z "$out" || return 0
-
-  if test -L "$src";then
-    of="${outfile%.NEW.[0-9]*}.`sfs_stamp "$outfile"`"
-    echo -n "Re-linking $src to ${of##*/} .. "
-    mv -i "$outfile" "$of"
-    mv "$src" "$src.OLD.`date +%s`"
-    ln -s "${of##*/}" "$src"
-    echo "Done."
-  elif test -e "$src";then
-    echo -n "Replacing $src with new file.. "
-    mv -i "$src" "$src.OLD.`sfs_stamp "$src"`"
-    mv -i "$outfile" "$src"
-    echo -n "Done."
-  fi
+  test -n "$out" || replace_sfs "$outfile" "$src"
 }
 
 link_deep() {
