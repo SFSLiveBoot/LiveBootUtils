@@ -38,6 +38,7 @@ var/log/canna/*
 var/log/boot*log
 var/log/apt/*
 var/log/aptitude*
+var/log/pacman.log
 var/log/installer
 var/log/samba/log.*
 var/log/udev
@@ -56,6 +57,7 @@ var/cache/apt/archives/partial/*
 var/cache/locate/locatedb
 var/cache/samba/*.*
 var/cache/samba/printing/*.*
+var/cache/pacman/pkg/*
 var/backups/*
 var/cache/modass/*
 usr/src/modules/*
