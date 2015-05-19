@@ -485,15 +485,16 @@ rebuild_sfs() {
 
   if test -L "$src";then
     of="${outfile%.NEW.[0-9]*}.`sfs_stamp "$outfile"`"
+    echo -n "Re-linking $src to ${of##*/} .. "
     mv -i "$outfile" "$of"
-    case "$(readlink "$src")" in */*) ;; *)
-        mv -v "$src" "$src.OLD.`date +%s`"
-        ln -sv "${of##*/}" "$src"
-      ;;
-    esac
+    mv "$src" "$src.OLD.`date +%s`"
+    ln -s "${of##*/}" "$src"
+    echo "Done."
   elif test -e "$src";then
-    mv -iv "$src" "$src.OLD.`sfs_stamp "$src"`"
-    mv -iv "$outfile" "$src"
+    echo -n "Replacing $src with new file.. "
+    mv -i "$src" "$src.OLD.`sfs_stamp "$src"`"
+    mv -i "$outfile" "$src"
+    echo -n "Done."
   fi
 }
 
