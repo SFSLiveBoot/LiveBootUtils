@@ -36,6 +36,35 @@ sfs_stamp() {
   return $ret
 }
 
+replace_sfs() {
+  local src="$1" dst="$2" uid gid mode new_tgt
+  test ! -d "$dst" || { dst="$dst/${src##*/}"; dst="${dst%.sfs*}.sfs" ; }
+  if test -e "$dst";then
+    local src_stamp="$(sfs_stamp "$src")" dst_stamp="$(sfs_stamp "$dst")"
+    local src_dtime="$(date --date=@$src_stamp +%y%m%d_%H%M%S)"
+    local dst_dtime="$(date --date=@$dst_stamp +%y%m%d_%H%M%S)"
+    uid="$(stat -Lc %u "$dst")" gid="$(stat -Lc %g "$dst")" mode="$(stat -Lc %a "$dst")"
+    chown "$uid" "$src" || true
+    chgrp "$gid" "$src" || true
+    chmod "$mode" "$src" || true
+    if test -L "$dst";then
+      new_tgt="$dst.$src_stamp"
+      echo -n "Re-linking $dst ($dst_dtime) to ${new_tgt##*/} ($src_dtime) .. "
+      mv "$src" "$new_tgt"
+      mv "$dst" "$dst.OLD.$(date +%s)"
+      ln -s "${new_tgt##*/}" "$dst"
+      echo "Done."
+    else
+      echo -n "Replacing $dst ($dst_dtime) with new version ($src_dtime).. "
+      mv "$dst" "$dst.OLD.$(date +%s)"
+      mv "$src" "$dst"
+      echo "Done."
+    fi
+  else
+    mv -v "$src" "$dst"
+  fi
+}
+
 get() {
   case "$1" in
     http://*|https://*|ftp://*) curl -f "$1";;
@@ -97,21 +126,7 @@ for sfs in $(find "$@" -maxdepth $find_maxdepth -name "*.sfs"); do
         continue
       }
       touch -m -d @$src_stamp "$sfs_new"
-      sfs_mode="$(stat -Lc %a "$sfs")"
-      sfs_owner="$(stat -Lc %u "$sfs")"
-      sfs_group="$(stat -Lc %g "$sfs")"
-      chgrp "$sfs_group" "$sfs_new" || true
-      chown "$sfs_owner" "$sfs_new" || true
-      chmod "$sfs_mode" "$sfs_new" || true
-
-      old_sfs="$sfs.OLD.$(date +%s)"
-      echo -n "Moving: "; mv -v "$sfs" "$old_sfs"
-      if test -L "$old_sfs";then
-        mv "$sfs_new" "$sfs.$src_stamp"
-        echo -n "Linking: "; ln -v -s "${sfs##*/}.$src_stamp" "$sfs"
-      else
-        echo -n "Moving: "; mv -v "$sfs_new" "$sfs"
-      fi
+      replace_sfs "$sfs_new" "$sfs"
     else
       echo "No update needed."
     fi
