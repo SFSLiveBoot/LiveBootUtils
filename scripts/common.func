@@ -450,6 +450,33 @@ replace_sfs() {
   fi
 }
 
+find_iname() {
+    local name="$1" IFS_save="$IFS" f n ret=""
+    IFS="/"
+    for n in $name; do
+        test -n "$n" || { ret="$ret/"; continue; }
+        test -d "${ret:-.}" && f="$(find "${ret:-.}" -mindepth 1 -maxdepth 1 -iname "$n" -printf "%f"| head -1)" || f=""
+        ret="$ret${f:-$n}/"
+    done
+    IFS="$IFS_save"
+    echo "${ret%/}$(test -n "${name%%*/}" || echo /)"
+}
+
+install_grub_efi() {
+  local target_dir="$1" efi_arch="${2:-x86_64-efi}" efi_image="bootx64.efi"
+  local efi_mods="${3:-configfile ext2 fat part_gpt part_msdos normal linux ls boot echo reboot search search_fs_file search_fs_uuid search_label help ntfs ntfscomp hfsplus chain multiboot terminal lspci font efi_gop efi_uga gfxterm}"
+
+  test -d "/usr/lib/grub/$efi_arch" || return 0
+  efi_dir="$(find_iname "$target_dir/EFI/Boot")"
+  boot_dir="$(find_iname "$target_dir/boot")"
+  test ! -e "$efi_dest/$efi_image" || return 0
+  mkdir -p "$efi_dir" "$boot_dir"
+  grub-mkimage -o "$efi_dir/$efi_image" -O "$efi_arch" -p "/boot/$efi_arch" $efi_mods
+  test -n "$boot_dir" || { boot_dir="$target_dir/boot" ; mkdir -p "$boot_dir"; }
+  cp -r "/usr/lib/grub/$efi_arch" "$boot_dir"
+  echo "source /grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
+}
+
 find_apt_fullpath() {
   local key="$1" ret=""
   while true;do

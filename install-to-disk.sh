@@ -165,28 +165,6 @@ copy_root_parts() {
   }
 }
 
-install_grub_efi() {
-  local tgt="$1"
-  efi_arch="x86_64-efi"
-  efi_image="bootx64.efi"
-  efi_mods="configfile ext2 fat part_gpt part_msdos normal linux ls boot echo reboot search search_fs_file search_fs_uuid search_label help ntfs ntfscomp hfsplus chain multiboot terminal lspci font efi_gop efi_uga gfxterm"
-
-  test -d "/usr/lib/grub/$efi_arch" || return 0
-  test -z "$(find "$tgt" -maxdepth 3 -ipath "*/efi/boot/$efi_image")" || return 0
-  efi_dir="$(find "$tgt" -maxdepth 2 -ipath "*/efi/boot")"
-  test -n "$efi_dir" || {
-    efi_dir="$(find "$tgt" -maxdepth 1 -ipath "*/efi")"
-    if test -n "$efi_dir";then efi_dir="$efi_dir/Boot"
-    else efi_dir="$tgt/EFI/Boot"; fi
-  }
-  mkdir -p "$efi_dir"
-  grub-mkimage -o "$efi_dir/$efi_image" -O "$efi_arch" -p "/boot/$efi_arch" $efi_mods
-  boot_dir="$(find "$tgt" -mindepth 1 -maxdepth 1 -type d -iname "boot")"
-  test -n "$boot_dir" || { boot_dir="$tgt/boot" ; mkdir -p "$boot_dir"; }
-  cp -r "/usr/lib/grub/$efi_arch" "$boot_dir"
-  echo "source /grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
-}
-
 install_grub() {
   local tgt="$1" dst_disk="$2"
   echo -n "installing grub to ${dst_disk}.. "
