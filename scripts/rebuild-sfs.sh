@@ -26,19 +26,21 @@ mount_combined "$wd" "$src"
 
 sname="$(basename "$src" .sfs)"
 sname="${sname#[0-9][0-9]-}"
+
+build_prompt="\\nRebuilding: \"${sname}.sfs\". Use 'exit 1' to cancel, 'exit 0' to save changes.\\n[\A][\W]\\\$ "
 cat <<EOF
 DESTDIR=$wd/ALL
 
 Apply your modifications and type 'exit 0' to build or 'exit 1' to cancel.
- Use 'cp2sfs </path/file/name>..' to include files from system to sfs.
+ Use 'cp2sfs </full/path/to/file>..' to include files from system to sfs.
 
 EOF
 keep_rebuilding=true
 while $keep_rebuilding;do
   (
     cd "$wd/ALL"
-    echo " . '$(dirname "$0")/common.func'; PS1='(rebuild: ${sname}.sfs) [\W]\\\$ '; exec <&1" |
-      env DESTDIR="$wd/ALL" bash -i
+    echo ' . "$_cf"; PS1="$_PS1"; exec <&1' |
+      env _cf="$(dirname "$0")/common.func" _PS1="$build_prompt" DESTDIR="$wd/ALL" bash -i
   ) || {
     echo "Cancelled.." >&2
     exit 1
