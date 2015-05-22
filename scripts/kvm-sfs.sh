@@ -11,8 +11,9 @@ dq='"'
 : ${kver:=$(uname -r)}
 : ${arch:=$(uname -m)}
 : ${mem:=512}
-: ${kernel:=/boot/vmlinuz-$kver}
-: ${initrd:=/boot/ramdisk_net-$kver}
+: ${kimg_d:=/boot}
+: ${kernel:=$kimg_d/vmlinuz-$kver}
+: ${initrd:=$kimg_d/ramdisk_net-$kver}
 : ${storage:=mem}
 
 test -n "$1" || {
@@ -20,11 +21,13 @@ test -n "$1" || {
   exit 1
 }
 
+test -r "$kernel" || kernel="/boot/${kernel##*/}"
+test -r "$kernel" || { echo "Cannot find kernel $kernel" >&2; exit 1; }
 test -r "$initrd" || {
   cat >&2 <<EOF
 Initrd '$initrd' not found, you might want to create it using following:
 
-git clone https://github.com/korc/make-ramdisk.git && make -C make-ramdisk KVER='$kver' NET=1 RAMDISK='$initrd'
+git clone https://github.com/korc/make-ramdisk.git && make -C make-ramdisk KVERS='$kver' NET=1 RAMDISK='$initrd'
 
 EOF
   exit 1
@@ -95,9 +98,10 @@ case "$mode" in
     cdrom_tmp_d="$(mktemp -d /tmp/iso-XXXXXX.d)"
     : ${dist_base:=$(dirname "$1")}
     : ${dist:=$(basename "$dist_base")}
-    : ${cdrom_dev:=/dev/sr0}
+    : ${cdrom_uuid:=$(date +%Y-%m-%d-%H-%M-%S-00)}
     mkdir -p "$cdrom_tmp_d/boot/grub/x86_64-efi" "$cdrom_tmp_d/boot/grub/i386-pc" "$cdrom_tmp_d/$dist"
     root_parts="/dev/sr0:$dist/*.sfs"
+    kernel_dir="$cdrom_tmp_d/boot"
     while test -n "$1";do
       sfs="$1"; shift; test "x$sfs" != "x--" || break
       if test -d "$sfs";then
@@ -107,7 +111,8 @@ case "$mode" in
         _extra_sfs="$_extra_sfs+:\$dist/${sfs##*/}"
       else case "$sfs" in
         $arch/*|*/$arch/*)
-          mkdir -p "$cdrom_tmp_d/$dist/$arch"; ln -s "$sfs" "$cdrom_tmp_d/$dist/$arch"
+          kernel_dir="$cdrom_tmp_d/$dist/$arch"
+          mkdir -p "$kernel_dir"; ln -s "$sfs" "$kernel_dir"
           case "$root_parts" in
             *'/$arch/*$kver.sfs'*) ;;
             *) root_parts="$root_parts+:$dist/\$arch/*\$kver.sfs";;
@@ -118,8 +123,10 @@ case "$mode" in
           sfs_subdir="${sfs_subdir%/*}"
           test -d "$cdrom_tmp_d/$dist/$sfs_subdir" || {
             mkdir -p "$cdrom_tmp_d/$dist/$sfs_subdir"
+            case " $not_rootpart " in *" $sfs_subdir "*) ;; *)
             _extra_sfs="$_extra_sfs+:\$dist/$sfs_subdir/*.sfs"
             root_parts="$root_parts+:$dist/$sfs_subdir/*.sfs"
+            ;; esac
           }
           ln -s "$sfs" "$cdrom_tmp_d/$dist/$sfs_subdir"
           ;;
@@ -134,15 +141,25 @@ case "$mode" in
     cat >"$cdrom_tmp_d/grubvars.cfg" <<EOF
 set dist="$dist"
 set arch="$arch"
-set kernel="/boot/${kernel##*/}"
-set initrd="/boot/${initrd##*/}"
-set root_dev="$cdrom_dev"
+set root_uuid="$cdrom_uuid"
 ${_extra_sfs:+set extra_sfs=$dq$_extra_sfs$dq}
-set no_storage_scan=1
+${no_storage_scan:+set no_storage_scan=$no_storage_scan}
 EOF
+    if test "x$kernel_dir" = "x$cdrom_tmp_d/$dist/$arch" -a -z "${kernel##*/vmlinuz-$kver}" -a -z "${initrd##*/ramdisk*-$kver}";then
+      echo "set kver=\"$kver\"" >> "$cdrom_tmp_d/grubvars.cfg"
+    else cat >>"$cdrom_tmp_d/grubvars.cfg" <<EOF
+set kernel="/${kernel_dir#$cdrom_tmp_d/}/${kernel##*/}"
+set initrd="/${kernel_dir#$cdrom_tmp_d/}/${initrd##*/}"
+EOF
+    fi
     ln -s "$grub_cfg_src" "$cdrom_tmp_d"
-    ln -s "$initrd" "$kernel" "$cdrom_tmp_d/boot"
-    grub-mkrescue -o "$cdrom_iso" -v "$cdrom_tmp_d" -- -f
+    ln -s "$initrd" "$kernel" "$kernel_dir"
+    case "$initrd" in */ramdisk_net-*)
+      initrd_normal="${initrd%/*}/ramdisk-${initrd#*/ramdisk_net-}"
+      test -e "$initrd_normal" || initrd_normal="$(dirname "$(readlink -f "$initrd")")/${initrd_normal##*/}"
+      test -e "$initrd_normal" && ln -s "$initrd_normal" "$kernel_dir" || ln -s "$initrd" "$kernel_dir/${initrd_normal##*/}"
+    ;; esac
+    grub-mkrescue -o "$cdrom_iso" -v "$cdrom_tmp_d" -- -f --modification-date=$(echo $cdrom_uuid | tr -d -)
     test -n "$keep_isodir" && echo "Keeping $cdrom_tmp_d" || rm -r "$cdrom_tmp_d"
     kvm_opts="$kvm_opts -cdrom $cdrom_iso"
   ;;
