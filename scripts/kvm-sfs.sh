@@ -59,7 +59,7 @@ test -z "$spice_port" || {
 
 : ${nbd_port:=$((8520+$$%100))}
 : ${nbd_wrapper:=$(PATH=$PATH:/usr/sbin:/sbin which xnbd-wrapper)}
-: ${grub_cfg_src:=/opt/LiveBootUtils/scripts/grub.cfg}
+: ${grub_cfg_src:=$(dirname "$0")/grub.cfg}
 : ${mode:=nbd}
 
 
