@@ -33,6 +33,16 @@ Apply your modifications and type 'exit 0' to build or 'exit 1' to cancel.
  Use 'cp2sfs </path/file/name>..' to include files from system to sfs.
 
 EOF
-if ( cd "$wd/ALL" ; echo ". \"\$_cf\"; PS1='($sname)[\W]\\\$ '; exec <&1" | env _cf="$(dirname "$0")/common.func" DESTDIR="$wd/ALL" bash -i );then
-  rebuild_sfs "$wd/ALL" "$src" "$ALL"
-fi
+keep_rebuilding=true
+while $keep_rebuilding;do
+  (
+    cd "$wd/ALL"
+    echo " . '$(dirname "$0")/common.func'; PS1='(rebuild: ${sname}.sfs) [\W]\\\$ '; exec <&1" |
+      env DESTDIR="$wd/ALL" bash -i
+  ) || {
+    echo "Cancelled.." >&2
+    exit 1
+  }
+  echo "Rebuilding to ${out:-$src}.."
+  rebuild_sfs "$wd/ALL" "$src" "$out" && keep_rebuilding=false || echo "Rebuild failed, try again." >&2
+done
