@@ -2,10 +2,18 @@
 
 from logging import info, warn, error
 import logging
+import subprocess
 from lbu_common import SFSDirectory, get_root_sfs, CLIProgressRepoter, stamp2txt
 
 logging.getLogger().setLevel(logging.INFO)
 
+_log_colors=dict(map(lambda (k,v):  (k, "\033[%sm"%(v,)),dict(blue="34", red="1;31", yellow="33", reset="1;0").items()))
+try: subprocess.check_call(["tty","-s"])
+except subprocess.CalledProcessError: pass
+else:
+    logging.addLevelName(logging.INFO, "{blue}{level}{reset}".format(level=logging.getLevelName(logging.INFO), **_log_colors))
+    logging.addLevelName(logging.WARNING, "{yellow}{level}{reset}".format(level=logging.getLevelName(logging.WARNING), **_log_colors))
+    logging.addLevelName(logging.ERROR, "{red}{level}{reset}".format(level=logging.getLevelName(logging.ERROR), **_log_colors))
 
 def update_sfs(source_dir, *target_dirs):
     if not target_dirs: target_dirs=(get_root_sfs().sfs_directory, )
