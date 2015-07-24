@@ -126,7 +126,7 @@ copy_root_parts() {
         ;;
       *)
         part_dstdir="${part_srcdir##*/}"
-        if test -z "$part_dst_sed" || part_dstdir="$(echo "$part_dstdir" | sed -e "$part_dst_sed")"
+        test -z "$part_dst_sed" || part_dstdir="$(echo "$part_dstdir" | sed -e "$part_dst_sed")"
         if test "x$part_dstdir" = "x$dist" -o "x$part_dstdir" = "xlive";then part_dstdir=""; else
           case "$part_dirlist" in
             "$part_dstdir"|"$part_dstdir "*|*" $part_dstdir"|*" $part_dstdir "*) ;;
