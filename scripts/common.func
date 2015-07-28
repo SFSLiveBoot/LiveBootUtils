@@ -468,11 +468,10 @@ install_grub_efi() {
 
   test -d "/usr/lib/grub/$efi_arch" || return 0
   efi_dir="$(find_iname "$target_dir/EFI/Boot")"
-  boot_dir="$(find_iname "$target_dir/boot")"
+  boot_dir="$(find_iname "$target_dir/boot/grub")"
   test ! -e "$efi_dest/$efi_image" || return 0
   mkdir -p "$efi_dir" "$boot_dir"
-  grub-mkimage -o "$efi_dir/$efi_image" -O "$efi_arch" -p "/boot/$efi_arch" $efi_mods
-  test -n "$boot_dir" || { boot_dir="$target_dir/boot" ; mkdir -p "$boot_dir"; }
+  grub-mkimage -o "$efi_dir/$efi_image" -O "$efi_arch" -p "${boot_dir#$target_dir}/$efi_arch" $efi_mods
   cp -r "/usr/lib/grub/$efi_arch" "$boot_dir"
   echo "source /grub.cfg" >"$boot_dir/$efi_arch/grub.cfg"
 }

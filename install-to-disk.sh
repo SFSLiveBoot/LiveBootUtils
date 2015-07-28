@@ -146,6 +146,7 @@ copy_root_parts() {
   if no_act "Installing kernel kver=$kver";then return 0; fi
   test -e "$kernel_dst" -o -n "$kernel" -o ! -r "/boot/vmlinuz-$kver" || kernel="/boot/vmlinuz-$kver"
   test -e "$kernel_dst" -o -z "$kernel" || {
+    mkdir -p "$dst/$arch/"
     cp -v "$kernel" "$dst/$arch/"
   }
   test -e "$initrd_dst" || {
@@ -159,8 +160,9 @@ copy_root_parts() {
           cp -vi "${initrd%/*}/ramdisk_net-$kver" "${initrd_dst%/*}/ramdisk_net-$kver"
         break
       else
-        echo -n "initrd 'ramdisk-$kver' full path: "
+        echo -n "initrd 'ramdisk-$kver' path: "
         read initrd
+        test ! -d "$initrd" || initrd="$initrd/ramdisk-$kver"
       fi
     done
   }
@@ -169,7 +171,7 @@ copy_root_parts() {
 install_grub() {
   local tgt="$1" dst_disk="$2"
   echo -n "installing grub to ${dst_disk}.. "
-  grub-install --boot-directory="$tgt/boot" "$dst_disk"
+  grub-install --target=i386-pc --boot-directory="$tgt/boot" "$dst_disk"
   cp /usr/share/grub/ascii.pf2 "$tgt/boot/grub"
   echo "source /grub.cfg" > "$tgt/boot/grub/grub.cfg"
   install_grub_efi "$tgt"
