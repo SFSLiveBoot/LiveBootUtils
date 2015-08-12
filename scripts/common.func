@@ -549,6 +549,17 @@ cat_file() {
   esac
 }
 
+dl_file() {
+  local url="$1"
+  local cached_file="$HOME/.cache/${cache_name:-lbu}/$(echo -n "$url" | md5sum | cut -c1-8)-${url##*/}"
+  test -s "$cached_file" || {
+    mkdir -p "${cached_file%/*}"
+    wget -O "${cached_file}.dl-tmp.$$" "$url" >&2 || return 1
+    mv "${cached_file}.dl-tmp.$$" "$cached_file"
+  }
+  echo "$cached_file"
+}
+
 dl_compile_and_install() {
   local do_patch
   test ! "x$1" = "x--patch" || { do_patch=1; shift ; }
