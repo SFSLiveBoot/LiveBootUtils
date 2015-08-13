@@ -145,13 +145,13 @@ class FSPath(object):
     def mountpoint(self):
         orig_dev=os.stat(self.path).st_dev
         path_components=os.path.realpath(self.path).split(os.path.sep)
-        while path_components:
-            test_path=os.path.sep.join(path_components[:-1])
-            if not test_path: return MountPoint(os.path.sep)
-            test_dev=os.stat(test_path).st_dev
-            if not test_dev == orig_dev: break
-            path_components.pop()
-        return MountPoint(os.path.sep.join(path_components))
+        sub_paths=map(lambda n: os.path.sep.join(path_components[:n+1]) or os.path.sep, range(len(path_components)))
+        cur_path=self.path
+        for test_path in reversed(sub_paths):
+            if not os.stat(test_path).st_dev==orig_dev:
+                break
+            cur_path=test_path
+        return MountPoint(cur_path)
 
     @cached_property
     def _parent_path(self):
