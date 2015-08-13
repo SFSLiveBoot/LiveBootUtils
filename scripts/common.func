@@ -610,17 +610,17 @@ dl_compile_and_install() {
   elif test -e "$src_dir/autogen.sh" -a ! -x "$src_dir/configure";then
     (cd "$src_dir" ; sh autogen.sh ) || return 1
   elif test -e "$src_dir/configure.ac" -a ! -x "$src_dir/configure";then
-    (cd "$src_dir" ; autoreconf ) || return 1
+    (cd "$src_dir" ; autoreconf -i ) || return 1
   fi
   if test -x "$src_dir"/configure;then
     (
       cd "$src_dir"
-      LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" ./configure --prefix="$prefix" "$@" $configure_args && make && make install DESTDIR="$inst_dest"
+      CPPFLAGS="-I$prefix/include" LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" ./configure --prefix="$prefix" "$@" $configure_args && make && make install DESTDIR="$inst_dest"
     ) || return 1
   elif test -e "$src_dir"/setup.py;then
     (
       cd "$src_dir"
-      LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" python setup.py install --prefix="$prefix" --root="$inst_dest" "$@" $setup_args
+      CPPFLAGS="-I$prefix/include" LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" python setup.py install --prefix="$prefix" --root="$inst_dest" "$@" $setup_args
     ) || return 1
   else
     echo "Don't know how to compile $src_dir" >&2
