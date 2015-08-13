@@ -580,19 +580,18 @@ dl_compile_and_install() {
   }
   if test "$#" -gt 4 ;then shift 4 ; else shift $#;fi
   if test -d "$src";then src_dir="$src"
-  else src_dir="${src_name}-src"
+  else src_dir="$HOME/.cache/lbu-compile/$(echo -n "$src" | md5sum | cut -c1-8)-${src_name}-src"
   fi
   if test -d "$src_dir";then
     test -z "$do_patch" || cat >/dev/null
   else
     case "$src" in
-      http://*|https://*|ftp://*)
-        local src_file="${src##*/}"
-        test -e "$src_file" || wget -O "$src_file" "$src" || return 1
-        src="$(readlink -f "$src_file")"
-      ;;
-      git://*)
+      git://*|https://*/*.git|http://*/*.git)
         git clone "$src" "$src_dir"
+      ;;
+      http://*|https://*|ftp://*)
+        local src_file="$(dl_file "$src")"
+        src="$(readlink -f "$src_file")"
       ;;
     esac
     mkdir -p "$src_dir"
