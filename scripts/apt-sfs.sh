@@ -23,13 +23,9 @@ elif test -z "$show_only";then
   chmod 755 "$sfs_src"
 fi
 
-: ${info_d:=$sfs_src/var/lib/dpkg/info}
-
-test -n "$show_only" || mkdir -p "$info_d"
-
 cache_dir="$(find_apt_fullpath "Dir::Cache::archives")"
 
-apt-get ${target_dist:+-t $target_dist} download --print-uris $(apt-get ${dpkg_status:+-o Dir::State::status="$dpkg_status" }${target_dist:+-t $target_dist }install -s "$@" | grep ^Inst | cut -f2 -d" ") | while read url fname fsize fhash;do
+apt-get ${target_dist:+-t $target_dist} download --print-uris $(required_debpkg "$@") | while read url fname fsize fhash;do
   test -z "$exclude_fnpat" || if echo "$fname" | grep -Eq "$exclude_fnpat";then continue; fi
   url="${url#'}"
   url="${url%'}"
@@ -47,18 +43,7 @@ apt-get ${target_dist:+-t $target_dist} download --print-uris $(apt-get ${dpkg_s
     ;;
     *) echo "Unknown url: $url" >&2 ; false ;;
   esac
-  dpkg-deb -x "$deb_file" "$sfs_src"
-  pkg_name="$(dpkg-deb -f "$deb_file" Package)"
-  test ! "x$(dpkg-deb -f "$deb_file" Multi-Arch)" = "xsame" ||
-    pkg_name="$pkg_name:$(dpkg-deb -f "$deb_file" Architecture)"
-
-  dpkg-deb --fsys-tarfile "$deb_file" | tar t | sed -e 's@^./@/@' -e 's@^/$@/.@' -e 's@/$@@' >"$info_d/${pkg_name}.list"
-  ctrl_tmp="$(mktemp -d)"
-  dpkg-deb -e "$deb_file" "$ctrl_tmp"
-  for f in "$ctrl_tmp"/*;do
-    mv "$f" "$info_d/$pkg_name.${f##*/}"
-  done
-  rmdir "$ctrl_tmp"
+  unpack_deb "$sfs_src" "$deb_file"
   echo "ok."
 done
 

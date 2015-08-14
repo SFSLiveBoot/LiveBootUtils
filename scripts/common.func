@@ -119,6 +119,33 @@ sfs_stamp() {
   return $ret
 }
 
+required_debpkg() {
+  local apt_output
+  apt_output="$(apt-get ${dpkg_status:+-o Dir::State::status="$dpkg_status" }${target_dist:+-t $target_dist }install -s "$@")" || return $?
+  echo "$apt_output" | grep ^Inst | cut -f2 -d" "
+}
+
+unpack_deb() {
+  local dst_dir="$1" deb_file pkg_name ctrl_tmp info_dir="${info_dir:-$1/var/lib/dpkg/info}"
+  test -d "$dst_dir" || { echo "Usage: unpack_deb <dest_dir> [<deb_files..>]" >&2; return 1; }
+  shift
+  test -d "$info_dir" || mkdir -p "$info_dir"
+  for deb_file;do
+    dpkg-deb -x "$deb_file" "$dst_dir"
+    pkg_name="$(dpkg-deb -f "$deb_file" Package)"
+    test ! "x$(dpkg-deb -f "$deb_file" Multi-Arch)" = "xsame" ||
+      pkg_name="$pkg_name:$(dpkg-deb -f "$deb_file" Architecture)"
+
+    dpkg-deb --fsys-tarfile "$deb_file" | tar t | sed -e 's@^./@/@' -e 's@^/$@/.@' -e 's@/$@@' >"$info_dir/${pkg_name}.list"
+    ctrl_tmp="$(mktemp -d)"
+    dpkg-deb -e "$deb_file" "$ctrl_tmp"
+    for f in "$ctrl_tmp"/*;do
+      mv "$f" "$info_dir/$pkg_name.${f##*/}"
+    done
+    rmdir "$ctrl_tmp"
+  done
+}
+
 copy_related_files() {
   local cp_cmd="copy_verbose" dst f arch="`uname -m`" kver="`uname -r`" d_kern f_kern d_arch d_sup f2 d_arch2
   test "x$1" != "x-cmd" || { cp_cmd="$2" ; shift 2 ; }
