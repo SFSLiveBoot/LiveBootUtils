@@ -69,24 +69,21 @@ class CLIProgressRepoter(object):
 
 
 class SFSDirectory(object):
-    BACKEND_TYPE_DIRECTORY, BACKEND_TYPE_FSPATH=range(2)
-    backend_type=None
-
     @repr_wrap
-    def __repr__(self): return self.backend.path if self.backend_type==self.BACKEND_TYPE_FSPATH else self.backend
+    def __repr__(self):
+        return str(self.backend)
 
     def __init__(self, backend):
         if isinstance(backend, basestring) and os.path.isdir(backend):
             backend=FSPath(backend)
-        self.backend=backend
         if isinstance(backend, FSPath):
-            self.backend_type=self.BACKEND_TYPE_FSPATH
+            self.backend = backend
+        else:
+            raise ValueError("Unknown backend: (%s) %r" % (type(backend).__name__, backend))
 
     @cached_property
     def all_sfs(self):
-        if self.backend_type==self.BACKEND_TYPE_FSPATH:
-            return list(self.backend.walk("*.sfs", file_class=SFSFile))
-        raise NotImplementedError("Unknown backend type", self.backend)
+        return list(self.backend.walk("*.sfs", file_class=SFSFile))
 
     def find_sfs(self, name):
         for sfs in self.all_sfs:
