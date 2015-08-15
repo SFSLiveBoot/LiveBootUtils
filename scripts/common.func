@@ -517,32 +517,34 @@ find_apt_fullpath() {
 }
 
 rebuild_sfs() {
-  local build="$1" src="$2" out="$3" outfile x of build_tmp
-  test -d "$build" || {
-    echo "Usage: $FUNCNAME <build_dir> <orig_sfs> [<out_sfs> [<mksquashfs_opts>]]" >&2
+  local src_dir="$1" orig="$2" out="$3" outfile x of build_tmp
+  test -d "$src_dir" || {
+    echo "Usage: $FUNCNAME <source_dir> <orig_sfs> [<out_sfs> [<mksquashfs_opts>]]" >&2
     return 1
   }
-  shift 3
+  test "$#" -le 3 && shift $# || shift 3
 
   while true;do
-    outfile="${out:-$src.NEW.`date +%s`}"
+    outfile="${out:-$orig.NEW.`date +%s`}"
     case "$(mnt2dev "$(file2mnt "$outfile")" 3)" in
       cifs)
         build_tmp="$(mktemp)"
-        mksquashfs "$build" "$build_tmp" -noappend "$@";
+        mksquashfs "$src_dir" "$build_tmp" -noappend "$@";
         mv -v "$build_tmp" "$outfile"
       ;;
-      *) mksquashfs "$build" "$outfile" "$@";;
+      *) mksquashfs "$src_dir" "$outfile" "$@";;
     esac
     sync
     if unsquashfs -l "$outfile" / >/dev/null;then break;fi
     echo -n 'Build failed!!! Press Enter to try again..' >&2
     read x
   done
-  chown "$(stat -c %u:%g "$(readlink -f "$src")")" "$outfile" || true
-  chmod "$(stat -c %a "$(readlink -f "$src")")" "$outfile" || true
+  test ! -e "$orig" || {
+    chown "$(stat -c %u:%g "$(readlink -f "$orig")")" "$outfile" || true
+    chmod "$(stat -c %a "$(readlink -f "$orig")")" "$outfile" || true
+  }
 
-  test -n "$out" || replace_sfs "$outfile" "$src"
+  test -n "$out" || replace_sfs "$outfile" "$orig"
 }
 
 link_deep() {
