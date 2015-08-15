@@ -1,58 +1,40 @@
 #!/bin/sh -e
 
-dst="$1"
-kver="${2:-$(uname -r)}"
+. "$(dirname "$0")/common.func"
 
-test -n "$dst" || {
-  echo "Usage: $0 <destfile.sfs> [kver=$kver]"
+which depmod || export PATH=/sbin:/usr/sbin:$PATH
+
+trap_fail
+
+: ${nr_procs:=$(grep -c ^processor /proc/cpuinfo)}
+: ${nr_procs:=2}
+: ${build_dir:=$(readlink -f "$PWD")}
+
+kernel_src="$1"
+
+test -e "${build_dir}/.config" -o -z "$(find "${build_dir}/" -mindepth 1 -maxdepth 1)" && test -e "$kernel_src/Makefile"  || {
+  echo "Usage: ${0##*/} <kernel_src> [<patches..>]" >&2
+  echo "This script have to be run in kernel build dir or completely empty directory" >&2
   exit 1
 }
 
-test -e "/lib/modules/$kver" || {
-  echo "Kernel version $kver is not readable at /lib/modules/$kver"
-  exit 1
-}
+shift
 
-on_exit() {
-  echo -n "Cleaning up $workdir.."
-  cut -f2 -d" " /proc/mounts | tac | grep "^$workdir/" | xargs umount
-  rm "$workdir/boot"/*
-  files_left="$(find "$workdir" -type f)"
-  if test -n "$files_left";then
-   echo "Files left?: $files_left" >&2
-   exit 1
-  else
-    rm -r "$workdir"
-    echo "Done."
-  fi
-}
+: ${kver:=$(make -s -C "$kernel_src" O="$build_dir" kernelversion)}
 
-workdir="$(mktemp -d)"
-chmod 755 "$workdir"
-echo "Working at: $workdir"
+test -e ".config" || make -C "$kernel_src" O="$build_dir" menuconfig
 
-trap on_exit EXIT
+make -j$nr_procs -C "$kernel_src" O="$build_dir" INSTALL_MOD_STRIP=1 deb-pkg
 
-hdr_dir=/usr/src/linux-headers-$kver
-more_dirs=""
+: ${sfs_d:=$(mktemp -d /tmp/kernel_sfs_d.$$.XXXXXX)}
 
-test ! -d "${hdr_dir%-*}-common" || more_dirs="${hdr_dir%-*}-common"
-for d in tools scripts;do
-  test -L "$hdr_dir/$d" || continue
-  more_dirs="${more_dirs:+$more_dirs }$(dirname $(readlink -f "$hdr_dir/$d"))"
-done
+find "$build_dir/../" -mindepth 1 -maxdepth 1 -name "linux-*_${kver}-$(cat "$build_dir/.version")_*.deb" -not -name "linux-libc-dev_*" \
+  -exec env sfs_d="$sfs_d" sh -c 'for deb;do dpkg-deb -x "$deb" "$sfs_d";done' _.sh {} +
 
-echo "Bind-mounting:"
-for bind_dir in  /lib/modules/$kver /lib/firmware/$kver $hdr_dir $more_dirs;do
-  test -d "$bind_dir" || continue
-  echo "  $bind_dir"
-  mkdir -p "$workdir$bind_dir"
-  mount --bind "$bind_dir" "$workdir$bind_dir"
-done
-echo "Ok."
+depmod -b "$sfs_d" "$kver"
 
-mkdir -p "$workdir/boot"
-ln /boot/*$kver* "$workdir/boot/"
+rebuild_sfs "$sfs_d" "$build_dir/../10-kernel-$kver.sfs" "" -all-root -noappend
 
-time mksquashfs "$workdir" "$dst" -all-root -noappend
+case "$sfs_d" in /tmp/kernel_sfs_d.$$.*) rm -r "$sfs_d";; esac
 
+exit_succ
