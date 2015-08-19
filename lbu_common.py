@@ -46,6 +46,30 @@ def repr_wrap(fn):
     return repr_gen
 
 
+def cli_func(func=None, name=None):
+    if func is None:
+        def gen(func_real):
+            if name is not None: func_real._cli_name=name
+            return cli_func(func_real)
+        return gen
+    cli_func.commands[getattr(func, "_cli_name", func.__name__.replace("_", "-"))]=func
+    if not func.__doc__:
+        import inspect
+        spec=inspect.getargspec(func)
+        rev_args=list(reversed(spec.args))
+        defaults=dict(map(lambda (i, d): (rev_args[i], d), enumerate(reversed(spec.defaults)))) if spec.defaults else {}
+        func.__doc__=" ".join(map(lambda n: "[<%s>=%r]"%(n, defaults[n]) if n in defaults else "<%s>"%n, spec.args)+
+                              (["[<%s>...]"%spec.varargs] if spec.varargs else [])+
+                              (["[<%s>=<value>...]"%spec.keywords] if spec.keywords else []))
+    return func
+cli_func.commands={}
+
+
+@cli_func(name="help")
+def cli_func_help(command):
+    return " ".join(map(str, ("Usage:", command, cli_func.commands[command].__doc__)))
+
+
 def stamp2txt(stamp):
     return time.strftime("%Y%m%d_%H%M%S", time.localtime(stamp))
 
@@ -291,6 +315,7 @@ class MountPoint(FSPath):
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
 
+@cli_func
 def get_root_sfs():
     test_file=FSPath("/bin/true")
     root_backend=SFSFile(test_file.backend)
@@ -332,6 +357,7 @@ def _root_command_out(cmd):
     return "".join(out).rstrip("\n")
 
 
+@cli_func
 def blkid_value(blk_dev, name):
     return _root_command_out(["blkid", "-o", "value", "-s", name, blk_dev])
 
@@ -345,12 +371,14 @@ def mount(src, dst, *opts, **kwargs):
     _root_command_out(cmd)
 
 
+@cli_func
 def mnt2dev(mnt, pos=0):
     esc_name=os.path.realpath(mnt).replace(" ", "\\040")
     with open("/proc/mounts") as proc_mounts:
         return filter(lambda l: l[1]==esc_name, map(lambda line: line.strip().split(), proc_mounts))[-1][pos]
 
 
+@cli_func
 def part2disk(dev):
     dev=dev.split("/")[-1]
     for d in glob.glob("/sys/block/*"):
@@ -359,6 +387,7 @@ def part2disk(dev):
     raise FilesystemError("No partition for device %r"%(dev,))
 
 
+@cli_func
 def blkid_find(**tags):
     cmd=reduce(lambda a, b: a + ["-t", "%s=%s"%b], tags.items(), ["blkid", "-o", "device"])
     return _root_command_out(cmd).split("\n")
@@ -366,6 +395,7 @@ def blkid_find(**tags):
 _url_re=re.compile(r'^(?P<schema>https?|ftp)://.*')
 
 
+@cli_func
 def sfs_stamp(src):
     if _url_re.match(src):
         with urllib2.urlopen(src) as file_obj:
@@ -373,6 +403,7 @@ def sfs_stamp(src):
     else: return sfs_stamp_file(src)
 
 
+@cli_func
 def sfs_stamp_file(f):
     close=False
     if isinstance(f, basestring):

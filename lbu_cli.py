@@ -3,7 +3,7 @@
 from logging import info, warn, error
 import logging
 import subprocess
-from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt
+from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt, cli_func
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -15,7 +15,10 @@ else:
     logging.addLevelName(logging.WARNING, "{yellow}{level}{reset}".format(level=logging.getLevelName(logging.WARNING), **_log_colors))
     logging.addLevelName(logging.ERROR, "{red}{level}{reset}".format(level=logging.getLevelName(logging.ERROR), **_log_colors))
 
+@cli_func
 def update_sfs(source_dir, *target_dirs):
+    source_dir=SFSDirectory(source_dir)
+    target_dirs=map(SFSDirectory, target_dirs)
     if not target_dirs: target_dirs=(get_root_sfs().sfs_directory, )
     for target_dir in target_dirs:
         last_dir=None
@@ -49,14 +52,20 @@ if __name__ == '__main__':
     try: command=sys.argv[1]
     except IndexError:
         warn("Usage: %s <command> [<args..>]", arg0)
-        info("Supported commands: %s", ", ".join(["update-sfs"]))
+        info("Supported commands: %s", ", ".join(cli_func.commands.keys()))
         raise SystemExit(1)
     logging.getLogger().name=command
-    if command=="update-sfs":
-        try: update_sfs(SFSDirectory(sys.argv[2]), *map(SFSDirectory, sys.argv[3:]))
-        except IndexError:
-            warn("Usage: %s <update-sfs> <update-source> [<update-dest..>]", arg0)
-            raise SystemExit(1)
-    else:
+    try: cmd_func=cli_func.commands[command]
+    except KeyError:
         error("Unknown command: %s", command)
         raise SystemExit(1)
+    try: ret=cmd_func(*sys.argv[2:])
+    except TypeError as e:
+        error("Execution error: %s", e)
+        info("Usage: %s %s %s", arg0, command, cmd_func.__doc__)
+        raise SystemExit(1)
+    if ret is not None:
+        if isinstance(ret, list):
+            for e in ret: print e
+        else:
+            print ret
