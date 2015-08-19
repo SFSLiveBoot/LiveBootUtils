@@ -50,7 +50,7 @@ def stamp2txt(stamp):
     return time.strftime("%Y%m%d_%H%M%S", time.localtime(stamp))
 
 
-class CLIProgressRepoter(object):
+class CLIProgressReporter(object):
     nr_buckets=10
     output_stream=sys.stdout
 

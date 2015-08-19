@@ -3,7 +3,7 @@
 from logging import info, warn, error
 import logging
 import subprocess
-from lbu_common import SFSDirectory, get_root_sfs, CLIProgressRepoter, stamp2txt
+from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -35,7 +35,7 @@ def update_sfs(source_dir, *target_dirs):
             elif src_sfs.create_stamp > sfs.create_stamp:
                 info("Replacing %s from %s: %s > %s", sfs_name, src_sfs.parent_directory,
                      stamp2txt(src_sfs.create_stamp), stamp2txt(sfs.create_stamp))
-                sfs.replace_with(src_sfs, progress_cb=CLIProgressRepoter(src_sfs.file_size))
+                sfs.replace_with(src_sfs, progress_cb=CLIProgressReporter(src_sfs.file_size))
             elif sfs.create_stamp == sfs.create_stamp:
                 info("Keeping same %s: %s", sfs_name, stamp2txt(src_sfs.create_stamp))
             else:
