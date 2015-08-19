@@ -59,7 +59,7 @@ if __name__ == '__main__':
     except KeyError:
         error("Unknown command: %s", command)
         raise SystemExit(1)
-    try: ret=cmd_func(*sys.argv[2:])
+    try: ret=cmd_func.cli_call(sys.argv[2:])
     except TypeError as e:
         error("Execution error: %s", e)
         info("Usage: %s %s %s", arg0, command, cmd_func.__doc__)

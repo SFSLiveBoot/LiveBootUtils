@@ -46,13 +46,23 @@ def repr_wrap(fn):
     return repr_gen
 
 
-def cli_func(func=None, name=None):
+def cli_func(func=None, name=None, parse_argv=None):
     if func is None:
         def gen(func_real):
             if name is not None: func_real._cli_name=name
+            if parse_argv is not None: func_real._cli_parse_argv=parse_argv
             return cli_func(func_real)
         return gen
     cli_func.commands[getattr(func, "_cli_name", func.__name__.replace("_", "-"))]=func
+    if getattr(func, "_cli_parse_argv", None) is None:
+        func._cli_parse_argv=lambda argv: (argv, {})
+
+    def cli_call(argv):
+        try: args, kwargs=func._cli_parse_argv(argv)
+        except Exception as e:
+            raise TypeError("bad arguments: %s"%e)
+        return func(*args, **kwargs)
+    func.cli_call=cli_call
     if not func.__doc__:
         import inspect
         spec=inspect.getargspec(func)
@@ -371,7 +381,7 @@ def mount(src, dst, *opts, **kwargs):
     _root_command_out(cmd)
 
 
-@cli_func
+@cli_func(parse_argv=lambda argv: ((argv[0],), {"pos": int(argv[1])} if len(argv)>1 else {}))
 def mnt2dev(mnt, pos=0):
     esc_name=os.path.realpath(mnt).replace(" ", "\\040")
     with open("/proc/mounts") as proc_mounts:
