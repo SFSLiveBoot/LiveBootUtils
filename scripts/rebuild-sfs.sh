@@ -9,12 +9,26 @@ on_exit() {
   unmount_below "$wd" && rmdir "$wd"/* "$wd"
 }
 
+case "$1" in
+ --relink) relink="yes"; shift;
+esac
+
 src="$1"
 out="$2"
 
 test -r "$src" || {
-  echo "Usage: $(basename "$0") <old.sfs> [<new.sfs>=$out]" >&2
+  echo "Usage: $(basename "$0") [--relink] <old.sfs> [<new.sfs>=$out]" >&2
   exit 1
+}
+
+test -n "$relink" -o ! -L "$src" || {
+  case "$(readlink "$src")" in
+    */*)
+      echo "ERROR: ${src##*/} is pointing to file in different directory: $(readlink $src)" >&2
+      echo "Use --relink option to rebuild anyway." >&2
+      exit 1
+    ;;
+  esac
 }
 
 wd="$(mktemp -d /tmp/rebuild.XXXXXX)"
