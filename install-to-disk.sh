@@ -93,16 +93,18 @@ copy_root_parts() {
       fi
     }
     part_sfs="${part_file##*/}"
+    part_fname="${part_sfs%.sfs*}.sfs"
     part_name="${part_sfs%.sfs*}"
     part_name="${part_name#[0-9][0-9]-}"
     test -z "$exclude_sfs" || {
       is_excluded=""
       for exclude_test in $exclude_sfs; do
-        case "$part_name" in $exclude_test) is_excluded=1; break;; esac
-        case "$part_file" in $exclude_test) is_excluded=1; break;; esac
+        case "$part_name" in $exclude_test) is_excluded="$exclude_test"; break;; esac
+        case "$part_fname" in $exclude_test) is_excluded="$exclude_test"; break;; esac
+        case "$part_file" in $exclude_test) is_excluded="$exclude_test"; break;; esac
       done
-      test -z "$is_excluded" || { 
-        echo "Skipping excluded sfs: '$part_name'" >&2
+      test -z "$is_excluded" || {
+        echo "Skipping '$part_fname' matching exclusion pattern '$exclude_test'" >&2
         continue
       }
     }
