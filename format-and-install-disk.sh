@@ -5,7 +5,8 @@
 run_as_root "$@"
 trap_fail
 
-drive="$1"
+: ${drive:=$1}
+: ${fs_type:=fat32}
 
 test -n "$drive" -a -e "$drive" || {
   show_info "Usage: $(basename "$0") /dev/sd[a-z] . Use 'blkid -o list' to get mounted info, and 'cat /proc/partitions' to see all drives"
@@ -15,31 +16,43 @@ test -n "$drive" -a -e "$drive" || {
 
 confirm_text "This will destroy all data on $drive, are you sure?" "YES"
 
+: ${part1:=${drive}1}
+: ${part2:=${drive}2}
+
 if grep -q "$drive" /proc/mounts;then
   show_info "Drive $drive is mounted, please run umount $drive first.$(echo; grep $drive /proc/mounts | cut -f1,2 -d" ")"
   exit 1
 fi
 
-set -x
-dd if=/dev/zero of="$drive" bs=512 count=63
+test -n "$MKFS_PROG" ||
+  case "$fs_type" in
+    fat32) MKFS_PROG=mkdosfs ;;
+    *) MKFS_PROG="mkfs.$fs_type" ;;
+  esac
 
+if test -z "$part2_start"; then
+  part1_end="100%"
+else
+  part1_end="$part2_start"
+fi
+
+set -x
+
+wipefs -a "$drive"
 parted "$drive" mklabel msdos
-parted "$drive" mkpart primary fat32 2048s 100%
+parted "$drive" mkpart primary $fs_type 2048s $part1_end
 parted "$drive" toggle 1 boot
-part="${drive}1"
+test -z "$part2_start" || parted "$drive" mkpart primary $fs_type $part2_start 100%
 
 udevadm settle
+blockdev --rereadpt "$drive"
 
-mkdosfs $part
+wipefs -a "$part1"
+test -z "$part2_start" || wipefs -a "$part2"
 
-mnt="$(mktemp -d /tmp/liveboot.XXXXXX)"
-mount $part $mnt
-trap "show_info \"Failed. Cleaning up $mnt\";umount $mnt;rmdir $mnt" EXIT
+$MKFS_PROG $part1
+test -z "$part2_start" || $MKFS_PROG ${part2_label:+-L "$part2_label"} $part2
 
-show_info "Starting to copy .sfs files, that will take a while."
-SILENT_EXIT=1 "$(dirname "$0")"/install-to-disk.sh "$mnt"
-
-umount $mnt
-rmdir $mnt
+SILENT_EXIT=1 "$(dirname "$0")"/install-to-disk.sh "$part1"
 
 exit_succ
