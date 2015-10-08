@@ -170,7 +170,10 @@ copy_root_parts() {
 install_grub() {
   local tgt="$1" dst_disk="$2"
   echo -n "installing grub to ${dst_disk}.. "
-  grub-install --target=i386-pc --boot-directory="$tgt/boot" "$dst_disk"
+  grub-install \
+    $(case "$(grub-install --help)" in *--target=*) echo --target=i386-pc;;esac) \
+    --boot-directory="$tgt/boot" \
+    "$dst_disk"
   cp /usr/share/grub/ascii.pf2 "$tgt/boot/grub"
   echo "source /grub.cfg" > "$tgt/boot/grub/grub.cfg"
   install_grub_efi "$tgt"
