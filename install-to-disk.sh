@@ -24,9 +24,8 @@ test -n "$tgt" || {
 test ! -b "$tgt" || { tgt_dev="$tgt"; tgt=""; }
 
 test -z "$tgt_dev" || if ! tgt="$(blkid2mnt "$(mountpoint -x "$tgt_dev")")";then
-  tgt="$(mktemp -d /tmp/install.XXXXXX)"
+  tgt="$(mktemp -d /tmp/install-to-disk.$$.XXXXXX)"
   mount "$tgt_dev" "$tgt"
-  tmp_tgt="1"
 fi
 
 mountpoint "$tgt"
@@ -196,5 +195,5 @@ no_act "Installing grub to $dst_disk" || install_grub "$tgt" "$dst_disk"
 copy_root_parts "$tgt/$dist"
 no_act "Creating grub.cfg" || create_grub_cfg "$tgt" "$dist"
 
-test -z "$tmp_tgt" || { echo -n "Unmounting $tgt.. "; umount "$tgt"; echo "Done."; rmdir "$tgt"; }
+case "$tgt" in /tmp/install-to-disk.$$.*) echo -n "Unmounting $tgt.. "; umount "$tgt"; echo "Done."; rmdir "$tgt";; esac
 exit_succ
