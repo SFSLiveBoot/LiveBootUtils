@@ -198,6 +198,9 @@ EOF
 no_act "Creating $tgt/$dist and $tgt/boot/grub" || mkdir -p "$tgt/$dist" "$tgt/boot/grub"
 no_act "Installing grub to $dst_disk" || install_grub "$tgt" "$dst_disk"
 copy_root_parts "$tgt/$dist"
+case "$(mnt2dev "$tgt" 3)" in
+  ext*) no_act "Converting .sfs files to symlinks" || "$(dirname "$0")/scripts/conv-sfs-to-links.sh" "$tgt/$dist";;
+esac
 no_act "Creating grub.cfg" || create_grub_cfg "$tgt" "$dist"
 
 case "$tgt" in /tmp/install-to-disk.$$.*) echo -n "Unmounting $tgt.. "; umount "$tgt"; echo "Done."; rmdir "$tgt";; esac
