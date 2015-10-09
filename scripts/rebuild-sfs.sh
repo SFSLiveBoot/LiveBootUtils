@@ -99,7 +99,11 @@ run_shell() {
       -delete
     mount -o remount "$lxc_root"
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    lxc-execute -n "rebuild-$sname" -s lxc.utsname="rebuild-$sname" -s lxc.rootfs="$lxc_root" -- su - root
+    lxc-execute -n "rebuild-$sname" \
+      -s lxc.utsname="rebuild-$sname" \
+      -s lxc.rootfs="$lxc_root" \
+      -s lxc.network.type=none \
+      -- su - root
   else
     echo ' . "$_rsh"; PS1="$_bp"; exec <&1' | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
   fi
