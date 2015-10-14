@@ -43,6 +43,8 @@ build_lxc_root() {
     "$(basename $(file2dev /bin/ls) | sed -e 's@\.sfs[.OLD0-9]*@@')" 15-settings 20-scripts 40-home \
     "$wd/$(basename "$src" .sfs)" "$wd/RW"
   rebuild_sh="/etc/profile.d/rebuild-$$.sh"
+  apt_conf="/etc/apt/apt.conf.d/99rebuild-conf"
+  echo "APT::Get::List-Cleanup off;" >"$lxc_root$apt_conf"
   cat_rebuild_sh >"$lxc_root$rebuild_sh"
   mkdir -p "$lxc_root/$DESTDIR"
   mount --bind "$DESTDIR" "$lxc_root/$DESTDIR"
@@ -96,6 +98,7 @@ run_shell() {
     find "$lxc_rw" -depth \
       $(d="$lxc_rw" IFS=/;for x in $DESTDIR; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
       $(d="$lxc_rw" IFS=/;for x in $rebuild_sh; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
+      $(d="$lxc_rw" IFS=/;for x in $apt_conf; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
       -not -path "$lxc_rw/.wh..wh.????" \
       -delete
     mount -o remount "$lxc_root"
@@ -104,6 +107,8 @@ run_shell() {
       -s lxc.utsname="rebuild-$sname" \
       -s lxc.rootfs="$lxc_root" \
       -s lxc.network.type=none \
+      -s lxc.mount.entry="$(find_apt_fullpath "Dir::Cache::archives") var/cache/apt/archives none bind 0 0" \
+      -s lxc.mount.entry="$(find_apt_fullpath "Dir::State::lists") var/lib/apt/lists none bind 0 0" \
       -- su - root
   else
     echo ' . "$_rsh"; PS1="$_bp"; exec <&1' | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
