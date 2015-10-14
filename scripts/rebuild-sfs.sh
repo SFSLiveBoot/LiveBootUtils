@@ -81,7 +81,8 @@ mount_combined "$wd" "$src"
 DESTDIR="$wd/ALL"
 sname="$(basename "$src" .sfs)"
 sname="${sname#[0-9][0-9]-}"
-build_prompt="\\nRebuilding: \"${sname}.sfs\". Use 'exit 1' to cancel, 'exit 0' to save changes.\\n[\A][\W]\\\$ "
+build_prompt="\\nRebuilding: \"${sname}.sfs\". Use 'rebuild-cancel' to cancel, 'rebuild-finalize' to save changes."
+build_prompt="$build_prompt\\n[\A][\W]\\\$ "
 
 if test -z "$use_lxc";then
   rebuild_sh="$(mktemp /tmp/rebuild-$$.XXXXXX.sh)"
