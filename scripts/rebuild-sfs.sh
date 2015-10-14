@@ -20,6 +20,8 @@ Usage: ${0##*/} [<options>] <old.sfs> [<new.sfs>=$out]
 Options:
   --relink:     replace sfs link even if it points to other directory
   --lxc:        build in clean lxc environment
+  --lxc-bind <fullpath>=<relpath>:  bind mount <fullpath> as <relpath>
+                example: /usr/src/wine=usr/src/wine
 EOF
 }
 
@@ -50,10 +52,13 @@ build_lxc_root() {
   mount --bind "$DESTDIR" "$lxc_root/$DESTDIR"
 }
 
+_nl='
+'
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
     --relink) relink="yes"; shift;;
     --lxc) use_lxc="yes"; shift;;
+    --lxc-bind) lxc_bind="${lxc_bind:+$lxc_bind$_nl}$2"; shift 2;;
     --help) usage; exit 0;;
     *) echo "Unknown option: '$1'" >&2; exit 1;;
   esac
@@ -103,13 +108,16 @@ run_shell() {
       -delete
     mount -o remount "$lxc_root"
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    lxc-execute -n "rebuild-$sname" \
+    test -z "$lxc_bind" || for mnt in $lxc_bind;do mkdir -p "$lxc_root/${mnt##*=}" ;done
+    (IFS="$_nl"; lxc-execute -n "rebuild-$sname" -l debug \
       -s lxc.utsname="rebuild-$sname" \
       -s lxc.rootfs="$lxc_root" \
       -s lxc.network.type=none \
       -s lxc.mount.entry="$(find_apt_fullpath "Dir::Cache::archives") var/cache/apt/archives none bind 0 0" \
       -s lxc.mount.entry="$(find_apt_fullpath "Dir::State::lists") var/lib/apt/lists none bind 0 0" \
+      ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=${mnt%=*} ${mnt##*=} none bind,ro 0 0";done)} \
       -- su - root
+    )
   else
     echo ' . "$_rsh"; PS1="$_bp"; exec <&1' | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
   fi
