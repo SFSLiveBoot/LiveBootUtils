@@ -8,7 +8,7 @@ set -e
 
 for fname in $(cat "$ctrl_d/.rebuild.lst");do
   echo -n "Removing: $fname .. " >&2
-  if test -L "$fname" -o -e "$fname";then
+  if test -L "$DESTDIR/$fname" -o -e "$DESTDIR/$fname";then
     rm -r "$DESTDIR/$fname"
     echo "ok." >&2
   else
