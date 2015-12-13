@@ -88,10 +88,10 @@ if test -d "$src";then
   esac
 fi
 
-test -n "$relink" -o ! -L "$src" || {
-  case "$(readlink "$src")" in
+test -n "$relink" -o ! -L "${out:-$src}" || {
+  case "$(readlink "${out:-$src}")" in
     */*)
-      echo "ERROR: ${src##*/} is pointing to file in different directory: $(readlink $src)" >&2
+      echo "ERROR: $(basename "${out:-$src}") is pointing to file in different directory: $(readlink ${out:-$src})" >&2
       echo "Use --relink option to rebuild anyway." >&2
       exit 1
     ;;
@@ -104,8 +104,9 @@ trap on_exit EXIT
 chmod 755 $wd
 
 mount_combined "$wd" "$src"
+test ! -d "$src" || { src="$out"; out=""; }
 DESTDIR="$wd/ALL"
-sname="$(basename "$src" .sfs)"
+sname="$(basename "${out:-$src}" .sfs)"
 sname="${sname#[0-9][0-9]-}"
 build_prompt="\\nRebuilding: \"${sname}.sfs\". Use 'rebuild-cancel' to cancel, 'rebuild-finalize' to save changes."
 build_prompt="$build_prompt\\n[\A][\W]\\\$ "
@@ -160,7 +161,6 @@ while $keep_rebuilding;do
     exit 1
   }
   echo "Rebuilding to ${out:-$src}.."
-  test ! -d "$src" || { src="$out"; out=""; }
   rebuild_sfs "$DESTDIR" "$src" "$out" ${sfs_exclude_file:+-wildcards -ef "$sfs_exclude_file"} &&
     keep_rebuilding=false || echo "Rebuild failed, try again." >&2
 done
