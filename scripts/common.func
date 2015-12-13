@@ -578,14 +578,22 @@ cat_file() {
   esac
 }
 
+: ${dl_cache_dir:=$HOME/.cache/${cache_name:-lbu}}
+
 dl_file() {
   local url="$1"
-  local cached_file="$HOME/.cache/${cache_name:-lbu}/$(echo -n "$url" | md5sum | cut -c1-8)-${url##*/}"
+  local cached_file="${cached_file:-$dl_cache_dir/$(echo -n "$url" | md5sum | cut -c1-8)-$(basename "${url%.git}")}"
+  case "$url" in *.git|git://*)
+    test -d "$cached_file" && ( cd "$cached_file"; git pull --recurse-submodules "$url" ${git_branch:+$git_branch} >&2 ) ||
+      git clone --recurse-submodules ${git_branch:+-b $git_branch} --depth=1 "$url" "$cached_file" >&2
+  ;;
+  *)
   test -s "$cached_file" || {
     mkdir -p "${cached_file%/*}"
     wget -O "${cached_file}.dl-tmp.$$" "$url" >&2 || return 1
     mv "${cached_file}.dl-tmp.$$" "$cached_file"
   }
+  ;; esac
   echo "$cached_file"
 }
 
