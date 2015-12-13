@@ -16,7 +16,7 @@ on_exit() {
 
 usage() {
   cat <<EOF
-Usage: ${0##*/} [<options>] <old.sfs> [<new.sfs>=$out]
+Usage: ${0##*/} [<options>] {<old.sfs>|source_dir|git_url} [<new.sfs>=$out]
 Options:
   --relink:     replace sfs link even if it points to other directory
   --lxc:        build in clean lxc environment
@@ -67,7 +67,26 @@ done
 src="$1"
 out="$2"
 
+case "$src" in
+    git://*|http://*.git|https://*.git|file://*.git)
+      src="$(dl_file "$src")"
+      echo "Source directory: $src"
+      test ! -e "$src/.git-facls" || ( cd "$src"; setfacl --restore=.git-facls )
+    ;;
+esac
+
 test -r "$src" || { usage >&2; exit 1; }
+
+if test -d "$src";then
+  test -n "$out" || { echo "With src as directory output file is mandatory" >&2; exit 1; }
+  case "$(mnt2dev $(file2mnt "$src") 3)" in
+    aufs)
+      echo "Source directory cannot be located on aufs. Perhaps you should set dl_cache_dir env var?" >&2
+      echo "Possibly good locations: $(grep -w -e tmpfs -e ext[2-4] /proc/mounts  | cut -f2 -d" " | tr \\n " ")" >&2
+      exit 1
+    ;;
+  esac
+fi
 
 test -n "$relink" -o ! -L "$src" || {
   case "$(readlink "$src")" in
@@ -90,6 +109,9 @@ sname="$(basename "$src" .sfs)"
 sname="${sname#[0-9][0-9]-}"
 build_prompt="\\nRebuilding: \"${sname}.sfs\". Use 'rebuild-cancel' to cancel, 'rebuild-finalize' to save changes."
 build_prompt="$build_prompt\\n[\A][\W]\\\$ "
+
+test -n "${sfs_exclude_file+yes}" -o ! -e "$DESTDIR/usr/src/sfs.d/.sqfs-exclude" ||
+  sfs_exclude_file="$DESTDIR/usr/src/sfs.d/.sqfs-exclude"
 
 if test -z "$use_lxc";then
   rebuild_sh="$(mktemp /tmp/rebuild-$$.XXXXXX.sh)"
@@ -138,5 +160,7 @@ while $keep_rebuilding;do
     exit 1
   }
   echo "Rebuilding to ${out:-$src}.."
-  rebuild_sfs "$DESTDIR" "$src" "$out" && keep_rebuilding=false || echo "Rebuild failed, try again." >&2
+  test ! -d "$src" || { src="$out"; out=""; }
+  rebuild_sfs "$DESTDIR" "$src" "$out" ${sfs_exclude_file:+-wildcards -ef "$sfs_exclude_file"} &&
+    keep_rebuilding=false || echo "Rebuild failed, try again." >&2
 done
