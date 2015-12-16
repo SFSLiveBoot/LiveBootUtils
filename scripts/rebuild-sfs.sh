@@ -54,6 +54,8 @@ build_lxc_root() {
 
 _nl='
 '
+auto_commands=' . "$_rsh"; PS1="$_bp";'
+
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
     --relink) relink="yes"; shift;;
@@ -63,6 +65,8 @@ while test -n "$1" -a -z "${1##--*}";do
     *) echo "Unknown option: '$1'" >&2; exit 1;;
   esac
 done
+
+auto_commands="${auto_commands}exec <&1;"
 
 src="$1"
 out="$2"
@@ -142,7 +146,7 @@ run_shell() {
       -- su - root
     )
   else
-    echo ' . "$_rsh"; PS1="$_bp"; exec <&1' | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
+    echo "$auto_commands" | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
   fi
 }
 
