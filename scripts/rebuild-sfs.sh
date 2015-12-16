@@ -1,6 +1,7 @@
 #!/bin/sh
 
-. "$(dirname "$0")/common.func"
+lbu_scripts="$(dirname "$0")"
+. "$lbu_scripts/common.func"
 
 set -e
 
@@ -28,12 +29,12 @@ EOF
 
 cat_rebuild_sh() {
   cat <<EOF
-. "${_cf:-/opt/LiveBootUtils/scripts/common.func}"
+. "${_cf:-$lbu_scripts/common.func}"
 export DESTDIR="$DESTDIR" TERM="$TERM"
 alias rebuild-finalize="exit 0"
 alias rebuild-cancel="exit 1"
 alias rebuild-reenter="exit 100"
-alias rebuild-auto="/opt/LiveBootUtils/scripts/rebuild-destdir.sh && exit 0"
+alias rebuild-auto="$lbu_scripts/rebuild-destdir.sh && exit 0"
 cd "\$DESTDIR"
 EOF
 }
@@ -123,7 +124,7 @@ test -n "${sfs_exclude_file+yes}" -o ! -e "$DESTDIR/usr/src/sfs.d/.sqfs-exclude"
 
 if test -z "$use_lxc";then
   rebuild_sh="$(mktemp /tmp/rebuild-$$.XXXXXX.sh)"
-  DESTDIR="$DESTDIR" _cf="$(dirname "$0")/common.func" cat_rebuild_sh >"$rebuild_sh"
+  DESTDIR="$DESTDIR" _cf="$lbu_scripts/common.func" cat_rebuild_sh >"$rebuild_sh"
 else
   build_lxc_root
 fi
