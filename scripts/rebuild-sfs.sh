@@ -20,6 +20,7 @@ Usage: ${0##*/} [<options>] {<old.sfs>|source_dir|git_url} [<new.sfs>=$out]
 Options:
   --relink:     replace sfs link even if it points to other directory
   --lxc:        build in clean lxc environment
+  --auto:       rebuild automatically
   --lxc-bind <fullpath>=<relpath>:  bind mount <fullpath> as <relpath>
                 example: /usr/src/wine=usr/src/wine
 EOF
@@ -32,6 +33,7 @@ export DESTDIR="$DESTDIR" TERM="$TERM"
 alias rebuild-finalize="exit 0"
 alias rebuild-cancel="exit 1"
 alias rebuild-reenter="exit 100"
+alias rebuild-auto="/opt/LiveBootUtils/scripts/rebuild-destdir.sh && exit 0"
 cd "\$DESTDIR"
 EOF
 }
@@ -59,6 +61,7 @@ auto_commands=' . "$_rsh"; PS1="$_bp";'
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
     --relink) relink="yes"; shift;;
+    --auto) auto_commands="${auto_commands}${_nl}rebuild-auto;"; shift;;
     --lxc) use_lxc="yes"; shift;;
     --lxc-bind) lxc_bind="${lxc_bind:+$lxc_bind$_nl}$2"; shift 2;;
     --help) usage; exit 0;;
