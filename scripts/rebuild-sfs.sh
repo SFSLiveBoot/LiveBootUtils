@@ -1,6 +1,6 @@
 #!/bin/sh
 
-lbu_scripts="$(dirname "$0")"
+lbu_scripts="$(readlink -f "$(dirname "$0")")"
 . "$lbu_scripts/common.func"
 
 set -e
