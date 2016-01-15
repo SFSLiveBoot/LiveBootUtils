@@ -218,6 +218,13 @@ aufs_refresh() {
   mount -o remount,mod:$(cat /sys/fs/aufs/si_$(aufs_si "$mnt")/br0) "$mnt"
 }
 
+aufs_orig() {
+  local fname="$(readlink -f "$(dirname "$1")")/$(basename "$1")" part
+  for part in $(aufs_parts "$(file2mnt "$fname")");do
+    if test -L "$part$fname" -o -e "$part$fname";then echo "$part$fname";fi
+  done
+}
+
 file2mnt() {
   local fname="$1" blkid up
   while test -n "$fname";do
