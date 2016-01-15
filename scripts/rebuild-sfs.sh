@@ -62,7 +62,7 @@ auto_commands=' . "$_rsh"; PS1="$_bp";'
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
     --relink) relink="yes"; shift;;
-    --auto) auto_commands="${auto_commands}${_nl}rebuild-auto;"; shift;;
+    --auto) auto_commands="${auto_commands}${_nl} rebuild-auto;"; shift;;
     --lxc) use_lxc="yes"; shift;;
     --lxc-bind) lxc_bind="${lxc_bind:+$lxc_bind$_nl}$2"; shift 2;;
     --help) usage; exit 0;;
