@@ -591,7 +591,7 @@ dl_file() {
   local url="$1"
   local cached_file="${cached_file:-$dl_cache_dir/$(echo -n "$url" | md5sum | cut -c1-8)-$(basename "${url%.git}")}"
   case "$url" in *.git|git://*)
-    test -d "$cached_file" && ( cd "$cached_file"; git pull --recurse-submodules "$url" ${git_branch:+$git_branch} && git submodule update ) >&2 ||
+    test -d "$cached_file" && ( cd "$cached_file"; git pull --recurse-submodules "$url" ${git_branch:+$git_branch} && git submodule update --depth 1) >&2 ||
       git clone --recurse-submodules ${git_branch:+-b $git_branch} --depth=1 "$url" "$cached_file" >&2
   ;;
   *)
