@@ -62,7 +62,7 @@ auto_commands=' . "$_rsh"; PS1="$_bp";'
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
     --relink) relink="yes"; shift;;
-    --auto) auto_commands="${auto_commands}${_nl} rebuild-auto;"; shift;;
+    --auto) auto_commands="${auto_commands}${_nl} rebuild-auto;"; auto_rebuild="yes"; shift;;
     --lxc) use_lxc="yes"; shift;;
     --lxc-bind) lxc_bind="${lxc_bind:+$lxc_bind$_nl}$2"; shift 2;;
     --help) usage; exit 0;;
@@ -75,8 +75,26 @@ auto_commands="${auto_commands}exec <&1;"
 src="$1"
 out="$2"
 
+: ${sfs_gitloc:=usr/src/sfs.d/.git-source}
+: ${sfs_gitcid:=usr/src/sfs.d/.git-commit}
+
+sfs_git_source() {
+  local tmp="$(mktemp -u -d -t unsquash-$$.XXXXXX)" src="$1" git_src
+  unsquashfs -n -d "$tmp" "$src" $sfs_gitloc >&2
+  git_src="$(cat "$tmp/$sfs_gitloc")"
+  rm -r "$tmp"
+  test -n "$git_src" || return 1
+  echo "$git_src"
+}
+
+test -z "$auto_rebuild" -o -n "$out" -o ! -s "$src" || {
+  out="$src"
+  src="$(sfs_git_source "$src")" || { src="$out"; out=""; }
+}
+
 case "$src" in
     git://*|http://*.git|https://*.git|file://*.git)
+      git_src="$src"
       src="$(dl_file "$src")"
       echo "Source directory: $src"
       test ! -e "$src/.git-facls" || ( cd "$src"; setfacl --restore=.git-facls )
@@ -163,6 +181,11 @@ Apply your modifications and type 'rebuild-finalize' to build or 'rebuild-cancel
 EOF
 keep_rebuilding=true
 while $keep_rebuilding;do
+  test -z "$auto_rebuild" -o -z "$git_src" || {
+    mkdir -p "$DESTDIR/${sfs_gitloc%/*}"
+    echo "$git_src" >"$DESTDIR/$sfs_gitloc"
+    (cd "$DESTDIR"; git log -1 --format=%H) >"$DESTDIR/$sfs_gitcid"
+  }
   run_shell || {
     case "$?" in 100) continue;; esac
     echo "Cancelled.." >&2
