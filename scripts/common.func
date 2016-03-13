@@ -225,6 +225,55 @@ aufs_orig() {
   done
 }
 
+file2mntinfo() {
+  local id=$(stat -c %d "$1")
+  grep "^[0-9]\+ [0-9]\+ $(printf "%d:%d" $(($id>>8)) $(($id&0xff)) ) " /proc/self/mountinfo
+}
+
+sfs2mnt() {
+  local sfs="$1" loop_bf_nfo loop_bf sfs_loop sfs_mnt
+  for loop_bf_nfo in /sys/class/block/loop*/loop/backing_file;do
+    read loop_bf <"$loop_bf_nfo"
+    test "$sfs" -ef "$loop_bf" || continue
+    sfs_loop="${loop_bf_nfo%/loop/backing_file}"
+    sfs_mnt="$(grep "^[0-9]\+ [0-9]\+ $(cat $sfs_loop/dev) " /proc/self/mountinfo | cut -f5 -d" " | head -1 | sed -e 's@\\040@ @g')"
+    sfs_loop="${sfs_loop#/sys/class/block/}"
+    break
+  done
+  test -z "$sfs_mnt" || { echo "$sfs_mnt"; return 0; }
+  sfs_mnt="/.parts/$(basename "${sfs%.sfs*}").$(sfs_stamp "$sfs")"
+  mountpoint -q "$sfs_mnt" && { echo "$sfs_mnt is already mounted by somebody" >&2; return 1; } || true
+  mkdir -p "$sfs_mnt"
+  if test -n "$sfs_loop";then mount -o ro "$sfs_loop" "$sfs_mnt"
+  else mount -o ro,loop "$sfs" "$sfs_mnt"
+  fi
+  echo "$sfs_mnt"
+}
+
+aufs_update_sfs_branch() {
+  local branch_dir aufs_mnt branch_loop branch_backfile branch_sfs aufs_si br_dir br_nr br_nfo sfs_mnt
+  branch_dir="$(readlink -f "$1")" aufs_mnt="${2:-/}"
+  branch_loop="$(file2mntinfo "$branch_dir" | grep -w -o "squashfs /dev/loop[0-9]\+" | cut -f2 -d" " | tail -1)"
+  test -n "$branch_loop" || { echo "Error: Cannot get loop dev for '$branch_dir'" >&2; return 1; }
+  branch_backfile="$(cat /sys/block/${branch_loop#/dev/}/loop/backing_file)"
+  branch_sfs="${branch_backfile%.sfs*}.sfs"
+  test -r "$branch_sfs" || { echo "Error: '$branch_sfs' is not readable file." >&2; return 1; }
+  test ! "$branch_backfile" -ef "$branch_sfs" || { echo "Skipping: '$branch_sfs' is the backing file." >&2; return 0; }
+  sfs_mnt="$(sfs2mnt "$branch_sfs")"
+  aufs_si="$(file2mntinfo "$aufs_mnt" | grep -w -o 'si=[0-9a-f]\+' | cut -f2 -d= | tail -1)"
+  test -n "$aufs_si" || { echo "Error: Cannot get 'si' for '$aufs_mnt'" >&2; return 1; }
+  for br_nfo in /sys/fs/aufs/si_${aufs_si}/br[0-9]*;do
+    br_dir=$(cut -f1 -d= "$br_nfo")
+    test "$br_dir" = "$branch_dir" || continue
+    br_nr="${br_nfo##*/br}"
+    echo "Replacing br$br_nr at $branch_dir with $branch_sfs at $sfs_mnt" >&2
+    mount -o remount,ins:$br_nr:"$sfs_mnt"=rr aufs "$aufs_mnt"
+    echo -n "Trying to unmount $br_dir .. " >&2
+    mount -o remount,del:"$br_dir" aufs "$aufs_mnt" && umount "$br_dir" && rmdir "$br_dir" && echo "Ok." >&2 || true
+    break
+  done
+}
+
 file2mnt() {
   local fname="$1" blkid up
   while test -n "$fname";do
