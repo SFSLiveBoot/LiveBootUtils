@@ -456,12 +456,12 @@ enter_chroot() {
     test -n "$lsof_out" || break
     echo "$lsof_out" >&2
     echo -n "Dangling processes, re-enter [Y/n]? " >&2
-    read x
+    read x || x="n"
     case "$x" in ""|y*|Y*) ;; *) break;; esac
   done
   test -z "$lsof_out" || {
     echo -n "Unmount [y/N]? " >&2
-    read x
+    read x || x="y"
     case "$x" in y*|Y*) lsof_out="";; esac
   }
 

@@ -3,6 +3,9 @@
 lbu_scripts="$(readlink -f "$(dirname "$0")")"
 . "$lbu_scripts/common.func"
 
+: ${lbu:=$(readlink -f "$lbu_scripts"/..)}
+export lbu
+
 set -e
 
 on_exit() {
