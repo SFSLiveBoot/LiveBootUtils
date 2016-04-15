@@ -64,15 +64,26 @@ no_act() {
   else return 1;fi
 }
 
+list_parts() {
+  local mnt="${1:-/}" aufs_si br_file part_dir
+  aufs_si="$(grep " $mnt aufs " /proc/mounts | grep -o si=[0-9a-f]* | cut -f2 -d=)"
+  if test -n "$aufs_si";then
+    for br_file in /sys/fs/aufs/si_${aufs_si}/br[0-9]*; do
+      read part_dir <"$br_file"
+      part_dir="${part_dir%=*}"
+      echo "$part_dir"
+    done
+  else
+    grep " $mnt overlay " /proc/mounts | grep -o "lowerdir=[^,]*" | cut -f2 -d= | tr : \\n
+  fi
+}
+
 copy_root_parts() {
-  local root_aufs_si="$(grep " / aufs " /proc/mounts | grep -o si=[0-9a-f]* | cut -f2 -d=)"
-  local dst="$1"
+  local dst="$1" part_dev part_file
   : ${kernel_dst:=$dst/$arch/vmlinuz-$kver}
   : ${initrd_dst:=$dst/$arch/ramdisk-$kver}
 
-  for root_part_br in /sys/fs/aufs/si_${root_aufs_si}/br[0-9]*; do
-    read part_mnt <"$root_part_br"
-    part_mnt="${part_mnt%=*}"
+  for part_mnt in $(list_parts /); do
     part_dev="$(mnt2dev "$part_mnt")" || continue
     case "$part_dev" in
       /dev/loop*) part_dev="${part_dev#/dev/}";;
