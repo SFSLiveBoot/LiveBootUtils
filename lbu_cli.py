@@ -67,5 +67,7 @@ if __name__ == '__main__':
     if ret is not None:
         if isinstance(ret, list):
             for e in ret: print e
+        elif isinstance(ret, dict):
+            print __import__("json").dumps(ret, indent=True)
         else:
             print ret
