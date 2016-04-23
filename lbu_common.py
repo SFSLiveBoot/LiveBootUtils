@@ -412,6 +412,34 @@ def sfs_stamp(src):
             return sfs_stamp_file(file_obj)
     else: return sfs_stamp_file(src)
 
+def _sfs_nfo_func(fname):
+    st=os.stat(fname)
+    return dict(size=st.st_size)
+
+def _sfs_list_rm_empty(node):
+    if "files" in node and not node["files"]: del node["files"]
+    if "dirs" in node:
+        for n in node["dirs"].keys():
+            _sfs_list_rm_empty(node["dirs"][n])
+            if not node["dirs"][n]: del node["dirs"][n]
+        if not node["dirs"]: del node["dirs"]
+
+@cli_func
+def gen_sfs_list(target_dir, exclude_pat="", include_pat="*.sfs,*/vmlinuz-*,*/ramdisk*"):
+    ret={}
+    exclude_pat=exclude_pat.split(",")
+    include_pat=include_pat.split(",")
+    orig_path=target_dir.split(os.path.sep)
+    for d, dn, fn in os.walk(target_dir):
+        dn[:]=filter(lambda n: not n.startswith("."), dn)
+        path_parts=d.split(os.path.sep)[len(orig_path):]
+        fn[:]=filter(lambda f: any(map(lambda pat: fnmatch.fnmatch(os.path.join(*(path_parts+[f])), pat), include_pat)), fn)
+        fn[:]=filter(lambda f: not any(map(lambda pat: fnmatch.fnmatch(os.path.join(*(path_parts+[f])), pat), exclude_pat)), fn)
+        dir_entry=reduce(lambda a, b: a["dirs"][b], path_parts, ret)
+        dir_entry.setdefault("files", {}).update(map(lambda f: (f, _sfs_nfo_func(os.path.join(d, f))), fn))
+        dir_entry.setdefault("dirs", {}).update(map(lambda n: (n, {}), dn))
+    _sfs_list_rm_empty(ret)
+    return ret
 
 @cli_func
 def sfs_stamp_file(f):
