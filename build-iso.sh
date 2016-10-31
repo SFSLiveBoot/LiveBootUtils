@@ -4,7 +4,7 @@ set -e
 
 outfile="$1"
 
-my_dir="$(dirname "$0")"
+: ${lbu:=$(dirname "$0")}
 : ${tag:=$(hexdump -e '"%02x"' -n 2 </dev/urandom)}
 : ${iso_label:=Bootable-$tag}
 : ${root_dev:=LABEL=$iso_label}
@@ -46,12 +46,11 @@ for sfs in $(cat /sys/block/loop*/loop/backing_file);do
   esac
   case "$sfs" in
     *$kver*) test -e "$target/$dist/$arch/${sfs##*/}" || ln -vs "$sfs" "$target/$dist/$arch/" ;;
+    */[5-9][0-9]-*) extras="extra"; mkdir -p "$target/$dist/extra"; ln -vs "$sfs" "$target/$dist/extra/";;
     *) test -e "$target/$dist/${sfs##*/}" || ln -vs "$sfs" "$target/$dist/" ;;
   esac
 done
 IFS="$IFS_save"
-
-test -e "$target/$dist/font.pf2" || ln -s /usr/share/grub/ascii.pf2 "$target/$dist/font.pf2"
 
 for logo_dir in "$dist_src" "${dist_src%/*}";do
   test -e "$logo_dir/logo.png" || continue
@@ -72,21 +71,22 @@ for comp in vmlinuz ramdisk;do
   }
 done
 
+dq='"'
 test -e "$target/grubvars.cfg" || cat >"$target/grubvars.cfg" <<EOF
 set dist=$dist
 set arch=$arch
 set kver=$kver
+${extras+set extras=$dq$extras$dq}
 set root_dev="$root_dev"
 ${ser_cons:+set ser_cons="$ser_cons"}
 ${append:+set append="$append"}
 EOF
 
-test -e "$target/boot/grub/grub.cfg" || echo "source /grub.cfg" >"$target/boot/grub/grub.cfg"
-test -e "$target/grub.cfg" || cp -v "$my_dir/scripts/grub.cfg" "$target"
+test -e "$target/boot/grub/grub.cfg" || ln -s "$lbu/scripts/grub.cfg" "$target/boot/grub/grub.cfg"
 
 if ( echo "Modify filesystem structure and exit this shell with 'exit 0' to build, with 'exit 1' to abort"; cd "$target" ; PS1="(build-iso)$PS1" bash );then
   set -x
-  grub-mkrescue -o "$outfile" "$target" -f -v -V "$iso_label"
+  grub-mkrescue -o "$outfile" "$target" -- -f -v -V "$iso_label"
 else
   echo "Aborting build." >&2
 fi
