@@ -9,26 +9,32 @@ trap_fail
 : ${nr_procs:=$(grep -c ^processor /proc/cpuinfo)}
 : ${nr_procs:=2}
 : ${build_dir:=$(readlink -f "$PWD")}
+: ${compile_target:=bindeb-pkg}
 
 kernel_src="$1"
 
 test -e "${build_dir}/.config" -o -z "$(find "${build_dir}/" -mindepth 1 -maxdepth 1)" && test -e "$kernel_src/Makefile"  || {
   echo "Usage: ${0##*/} <kernel_src> [<patches..>]" >&2
-  echo "This script have to be run in kernel build dir or completely empty directory" >&2
+  echo "This script have to be run in a kernel build dir" >&2
   exit 1
 }
 
 shift
 
-: ${kver:=$(make -s -C "$kernel_src" O="$build_dir" kernelversion)}
-
 test -e ".config" || make -C "$kernel_src" O="$build_dir" menuconfig
 
-make -j$nr_procs -C "$kernel_src" O="$build_dir" INSTALL_MOD_STRIP=1 deb-pkg
+tm0=$(date +%s)
+make -j$nr_procs -C "$kernel_src" O="$build_dir" INSTALL_MOD_STRIP=1 $compile_target
+tm1=$(date +%s)
+
+echo "Compile time: $(($tm1-$tm0)) seconds"
+
+: ${kver:=$(make -s -C "$kernel_src" O="$build_dir" kernelrelease)}
+: ${deb_ver:=$(cat "$build_dir/.version")}
 
 : ${sfs_d:=$(mktemp -d /tmp/kernel_sfs_d.$$.XXXXXX)}
 
-find "$build_dir/../" -mindepth 1 -maxdepth 1 -name "linux-*_${kver}-$(cat "$build_dir/.version")_*.deb" -not -name "linux-libc-dev_*" \
+find "$build_dir/../" -mindepth 1 -maxdepth 1 -name "linux-*_${kver}-${deb_ver}_*.deb" -not -name "linux-libc-dev_*" \
   -exec env sfs_d="$sfs_d" sh -c 'for deb;do dpkg-deb -x "$deb" "$sfs_d";done' _.sh {} +
 
 depmod -b "$sfs_d" "$kver"
@@ -36,5 +42,8 @@ depmod -b "$sfs_d" "$kver"
 rebuild_sfs "$sfs_d" "$build_dir/../10-kernel-$kver.sfs" "" -all-root -noappend
 
 case "$sfs_d" in /tmp/kernel_sfs_d.$$.*) rm -r "$sfs_d";; esac
+tm2=$(date +%s)
+
+echo "Compile time: $(($tm1-$tm0)), packaging time: $(($tm2-$tm1))"
 
 exit_succ
