@@ -2,92 +2,84 @@
 
 set -e
 
-outfile="$1"
-
+: ${lbu:=/opt/LiveBootUtils}
 : ${lbu:=$(dirname "$0")}
-: ${tag:=$(hexdump -e '"%02x"' -n 2 </dev/urandom)}
-: ${iso_label:=Bootable-$tag}
-: ${root_dev:=LABEL=$iso_label}
+: ${arch:=$(uname -m)}
 
-test -n "$no_serial" -o -n "$ser_cons" || ser_cons="0"
-
-test -n "$outfile" || {
-  echo "Usage: ${0##*/} <output.iso> [<template_dir>]" >&2
-  echo -n "Enter outfile .iso file name: "
-  read outfile
-  test -n "$outfile" || exit 1
-}
-
-rm_target() { echo -n "Removing $target.. " >&2; rm -r "$target"; echo "Ok.">&2; }
-
-target="$2"
-test -n "$target" || {
-  target=$(mktemp -d /tmp/build-iso.XXXXXX)
-  trap rm_target EXIT
-  trap "exit 1" INT
-}
-
-: ${arch:=`uname -m`}
-: ${kver:=`uname -r`}
-
-mkdir -p "$target/boot/grub"
-
-IFS_save="$IFS"
-IFS="
-"
-for sfs in $(cat /sys/block/loop*/loop/backing_file);do
-  test -n "$dist" || {
-    dist_src="${sfs%/*}"
-    dist="${dist_src##*/}"
-  }
-  mkdir -p "$target/$dist/$arch"
-  case "$sfs" in
-    *.sfs.[0-9]*[0-9]) test ! -e "${sfs%.sfs.[0-9]*[0-9]}.sfs" || sfs="${sfs%.sfs.[0-9]*[0-9]}.sfs" ;;
+while true;do
+  case "$1" in
+    --pause|-p) pause=1;;
+    --append) append="$2"; shift;;
+    --serial-console) ser_cons="$2"; shift;;
+    *) break;;
   esac
-  case "$sfs" in
-    *$kver*) test -e "$target/$dist/$arch/${sfs##*/}" || ln -vs "$sfs" "$target/$dist/$arch/" ;;
-    */[5-9][0-9]-*) extras="extra"; mkdir -p "$target/$dist/extra"; ln -vs "$sfs" "$target/$dist/extra/";;
-    *) test -e "$target/$dist/${sfs##*/}" || ln -vs "$sfs" "$target/$dist/" ;;
-  esac
-done
-IFS="$IFS_save"
-
-for logo_dir in "$dist_src" "${dist_src%/*}";do
-  test -e "$logo_dir/logo.png" || continue
-  test -e "$target/logo.png" || ln -s "$logo_dir/logo.png" "$target"
-  break
+  shift
 done
 
-for kern_dir in /boot /live/$arch /live "$dist_src/$arch" "$dist_src";do
-  for comp in vmlinuz ramdisk ramdisk_net;do
-    test -e "$target/$dist/$arch/$comp-$kver" || test ! -e "$kern_dir/$comp-$kver" || ln -vs "$kern_dir/$comp-$kver" "$target/$dist/$arch/"
-  done
+iso="$1"
+test -n "$2" || {
+  cat >&2 <<EOF
+Usage: ${0##*/} [<options..>] <out.iso> <sources.sfs..>
+Options:
+   -p (or --pause)           Pause before build, allowing changes to be made
+   --append <string>         Append to kernel commandline (in grub.cfg)
+   --serial-console <digit>  Define serial console to use during boot
+EOF
+  exit 1
+}
+shift 1
+
+test ! -e "$iso" || {
+  echo "$iso already exists, aborting" >&2
+  exit 1
+}
+
+iso_d=$(mktemp -d /tmp/build-iso.XXXXXX)
+
+rm_tmp() { echo -n "Removing '$iso_d' .. "; rm -r "$iso_d"; echo "done."; }
+trap rm_tmp EXIT
+
+for fname;do
+  : ${files_top:=$(dirname "$fname")}
+  : ${dist:=$(basename "$files_top")}
+  dest_name="${fname#$files_top/}"
+  mkdir -p "$(dirname "$iso_d/$dist/$dest_name")"
+  case "$dest_name" in
+    $arch/[0-9][0-9]-kernel-*.sfs)
+      kver="${dest_name#$arch/[0-9][0-9]-kernel-}"
+      kver="${kver%.sfs}"
+      dst="$iso_d/$dist/$arch" find "$(readlink -f "$(dirname "$fname")")" -maxdepth 1 \( -name "vmlinuz-$kver" -o -name "ramdisk*$kver" \) -exec sh -c 'for f;do ln -vs "$f" "$dst";done' _ {} +
+    ;;
+    */*)
+      dname="${dest_name%/*}"
+      case " $extras " in
+        *" $dname "*) ;;
+        *) extras="${extras+$extras }$dname";;
+      esac
+    ;;
+  esac
+  ln -vs "$(readlink -f "$fname")" "$iso_d/$dist/$dest_name"
 done
 
 for comp in vmlinuz ramdisk;do
-  test -e "$target/$dist/$arch/$comp-$kver" || {
-    echo "$comp-$kver not found, aborting" >&2
+  test -e "$iso_d/$dist/$arch/$comp-$kver" || {
+    echo "Required file $comp-$kver not found, aborting. Did you specify correct XX-kernel-KVER.sfs in commandline?" >&2
     exit 1
   }
 done
 
 dq='"'
-test -e "$target/grubvars.cfg" || cat >"$target/grubvars.cfg" <<EOF
-set dist=$dist
-set arch=$arch
-set kver=$kver
+cat >"$iso_d/grubvars.cfg" <<EOF
+set dist="$dist"
+set arch="$arch"
+set kver="$kver"
 ${extras+set extras=$dq$extras$dq}
-set root_dev="$root_dev"
-${ser_cons:+set ser_cons="$ser_cons"}
-${append:+set append="$append"}
+${ser_cons+set ser_cons=$dq$ser_cons$dq}
+${append+set append=$dq$append$dq}
 EOF
 
-test -e "$target/boot/grub/grub.cfg" || ln -s "$lbu/scripts/grub.cfg" "$target/boot/grub/grub.cfg"
+mkdir -p "$iso_d/boot/grub"
+ln -s "$lbu/scripts/grub.cfg" "$iso_d/boot/grub"
 
-if ( echo "Modify filesystem structure and exit this shell with 'exit 0' to build, with 'exit 1' to abort"; cd "$target" ; PS1="(build-iso)$PS1" bash );then
-  set -x
-  grub-mkrescue -o "$outfile" "$target" -- -f -v -V "$iso_label"
-else
-  echo "Aborting build." >&2
-fi
-
+test -z "$pause" || { echo -n "Press ENTER to build '$iso' from '$iso_d' .. "; read x; }
+grub-mkrescue -o "$iso" "$iso_d" -- -f -v
