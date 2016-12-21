@@ -110,9 +110,15 @@ if test -d "$src";then
   test -n "$out" || { echo "With src as directory output file is mandatory" >&2; exit 1; }
   case "$(mnt2dev $(file2mnt "$src") 3)" in
     aufs)
-      echo "Source directory cannot be located on aufs. Perhaps you should set dl_cache_dir env var?" >&2
-      echo "Possibly good locations: $(grep -w -e tmpfs -e ext[2-4] /proc/mounts  | cut -f2 -d" " | tr \\n " ")" >&2
-      exit 1
+      src_orig="$(aufs_orig "$src")"
+      test "$(echo "$src_orig" | wc -l)" -eq 1 || {
+        echo "Source in AUFS with multiple backends, please set dl_cache_dir env var to non-aufs location" >&2
+        echo "Detected backends of '$src':" >&2
+        echo "$src_orig" | sed -e 's/^/  /g' >&2
+        echo "Possibly good locations: $(grep -w -e tmpfs -e ext[2-4] /proc/mounts  | cut -f2 -d" " | tr \\n " ")" >&2
+        exit 1
+      }
+      src="$src_orig"
     ;;
   esac
 fi
