@@ -18,7 +18,7 @@ IFS_save="$IFS"
 
 : ${sfs_gitloc:=usr/src/sfs.d/.git-source}
 : ${sfs_gitcid:=usr/src/sfs.d/.git-commit}
-: ${sfs_update_check:=usr/src/sfs.d/.is-up-to-date}
+: ${sfs_update_check:=usr/src/sfs.d/.check-up-to-date}
 
 find_loop() {
   local file="$1" offset="${2:-0}" file_aufs bf bf_offset bf_file
