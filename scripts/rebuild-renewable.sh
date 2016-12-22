@@ -45,18 +45,19 @@ find_mount() {
   echo "$ret"
 }
 
-on_exit() {
+unmount_tmp() {
   test -z "$do_unmount" || {
-    echo "Unmounting temporary mounts.. "
+    echo -n "Unmounting "
     for mnt in $do_unmount;do
-      echo -n "  $mnt.."
-      umount "$mnt" && { echo "ok"; rmdir "$mnt"; } || echo "failed?"
+      echo -n "$mnt .. "
+      umount "$mnt" && rmdir "$mnt" || true
     done
     echo "done."
+    do_unmount=""
   }
 }
 
-trap on_exit EXIT
+trap unmount_tmp EXIT
 
 for sfs;do
   if test -d "$sfs";then
@@ -95,4 +96,5 @@ for sfs;do
   else
     echo "no version check script."
   fi
+  test -z "$do_unmount" || unmount_tmp
 done
