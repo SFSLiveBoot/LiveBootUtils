@@ -231,7 +231,7 @@ file2mntinfo() {
 }
 
 sfs2mnt() {
-  local sfs="$1" loop_bf_nfo loop_bf sfs_loop sfs_mnt
+  local sfs="$1" loop_bf_nfo loop_bf sfs_loop sfs_mnt mnt_count=""
   for loop_bf_nfo in /sys/class/block/loop*/loop/backing_file;do
     read loop_bf <"$loop_bf_nfo"
     test "$sfs" -ef "$loop_bf" || continue
@@ -242,7 +242,10 @@ sfs2mnt() {
   done
   test -z "$sfs_mnt" || { echo "$sfs_mnt"; return 0; }
   sfs_mnt="/.parts/$(basename "${sfs%.sfs*}").$(sfs_stamp "$sfs")"
-  mountpoint -q "$sfs_mnt" && { echo "$sfs_mnt is already mounted by somebody" >&2; return 1; } || true
+  while mountpoint -q "$sfs_mnt${mnt_count:+-$mnt_count}";do
+    mnt_count="$((${mnt_count:-0}+1))"
+  done
+  sfs_mnt="$sfs_mnt${mnt_count:+-$mnt_count}"
   mkdir -p "$sfs_mnt"
   if test -n "$sfs_loop";then mount -o ro "$sfs_loop" "$sfs_mnt"
   else mount -o ro,loop "$sfs" "$sfs_mnt"
