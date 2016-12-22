@@ -20,23 +20,15 @@ IFS_save="$IFS"
 : ${sfs_gitcid:=usr/src/sfs.d/.git-commit}
 : ${sfs_update_check:=usr/src/sfs.d/.is-up-to-date}
 
-cat_sfs_file() {
-  local sfs="$1" fname="$2" unsq_tmp="$(mktemp -u -d /tmp/unsquash.$$.XXXXXX)" ret
-  unsquashfs -n -d "$unsq_tmp" "$sfs" "$fname" >/dev/null
-  test -e "$unsq_tmp/$fname" || ret=1 && cat "$unsq_tmp/$fname"
-  rm -r "$unsq_tmp"
-  return $ret
-}
-
 find_loop() {
-  local file="$1" file_aufs bf bf_offset bf_file
+  local file="$1" offset="${2:-0}" file_aufs bf bf_offset bf_file
   file_aufs="$(aufs_orig "$file")"
   test -z "$file_aufs" || file="$file_aufs"
   for bf in /sys/block/loop*/loop/backing_file;do
     read bf_file < "$bf"
     test "$bf_file" = "$file" || continue
     read bf_offset < "${bf%/backing_file}/offset"
-    test "$bf_offset" -eq 0 || continue
+    test "$bf_offset" -eq "$offset" || continue
     bf="${bf#/sys/block/}"
     echo "/dev/${bf%/loop/backing_file}"
     return 0
@@ -53,6 +45,19 @@ find_mount() {
   echo "$ret"
 }
 
+on_exit() {
+  test -z "$do_unmount" || {
+    echo "Unmounting temporary mounts.. "
+    for mnt in $do_unmount;do
+      echo -n "  $mnt.."
+      umount "$mnt" && { echo "ok"; rmdir "$mnt"; } || echo "failed?"
+    done
+    echo "done."
+  }
+}
+
+trap on_exit EXIT
+
 for sfs;do
   if test -d "$sfs";then
     IFS="$_nl"
@@ -61,9 +66,15 @@ for sfs;do
     continue
   fi
   echo -n "Checking $sfs.. "
-  if git_loc="$(cat_sfs_file "$sfs" "$sfs_gitloc")";then
+  sfs_mount="$(find_mount "$sfs")" || {
+    sfs_mount="$(sfs2mnt "$sfs")"
+    do_unmount="$sfs_mount${do_unmount:+ $do_unmount}"
+  }
+
+  if test -e "$sfs_mount/$sfs_gitloc";then
+    git_loc="$(cat "$sfs_mount/$sfs_gitloc")"
+    git_commit="$(cat "$sfs_mount/$sfs_gitcid")"
     echo "checking out latest version from $git_loc"
-    git_commit="$(cat_sfs_file "$sfs" "$sfs_gitcid")"
     sfs_git_dir="$(dl_file "$git_loc")"
     test "$(cd "$sfs_git_dir";git log -1 --format=%H)" = "$git_commit" || {
       echo "git commit changed, rebuilding.."
@@ -73,18 +84,15 @@ for sfs;do
   else
     echo -n "no git.. "
   fi
-  sfs_mount="$(find_mount "$sfs")" || {
-    do_unmount="$sfs_mount${do_unmount:+ $do_unmount}"
-    sfs_mount="$(sfs2mnt "$sfs")"
-  }
+
   if test -x "$sfs_mount/$sfs_update_check";then
     env DESTDIR="$sfs_mount" "$sfs_mount/$sfs_update_check" || {
-      echo "confirmed not latest version, rebuilding"
+      echo "confirmed not to be latest version, rebuilding.."
       "$rebuild_sh" --auto "$sfs"
       continue
     }
-    echo "confirmed to be latest version"
+    echo "confirmed to be latest version."
   else
-    echo "no version check script '$sfs_update_check'"
+    echo "no version check script."
   fi
 done
