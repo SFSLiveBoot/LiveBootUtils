@@ -24,9 +24,11 @@ Usage: ${0##*/} [<options>] {<old.sfs>|source_dir|git_url} [<new.sfs>=$out]
 Options:
   --relink:     replace sfs link even if it points to other directory
   --lxc:        build in clean lxc environment
-  --auto:       rebuild automatically
+  --lxc='<sfs_names..>'
+                build in clean env with specific parts, ex. 'jessie-gnome settings scripts'
   --lxc-bind <fullpath>=<relpath>:  bind mount <fullpath> as <relpath>
                 example: /usr/src/wine=usr/src/wine
+  --auto:       rebuild automatically. in lxc mode, use 'rebuild-auto' at prompt.
 EOF
 }
 
@@ -45,11 +47,13 @@ EOF
 build_lxc_root() {
   lxc_root="$(mktemp -d /tmp/rebuild-lxc-root.$$.XXXXXX)"
   lxc_rw="$(mktemp -d /tmp/rebuild-lxc-rw.$$.XXXXXX)"
+  : ${lxc_root_sfs:=$(basename $(file2dev /bin/ls) | sed -e 's@\.sfs[.OLD0-9]*@@')}
+  : ${lxc_src_sfs:=$wd/$(basename "$src" .sfs)}
   echo "lxc_rw=$lxc_rw"
   mount -t tmpfs -o mode=0755 lxc-rw "$lxc_rw"
   LXC_ROOTFS_PATH="$lxc_root" LXC_ROOT_RW="$lxc_rw" /etc/lxc/mount-sfs.sh \
-    "$(basename $(file2dev /bin/ls) | sed -e 's@\.sfs[.OLD0-9]*@@')" 15-settings 20-scripts 40-home \
-    "$wd/$(basename "$src" .sfs)" "$wd/RW"
+    ${lxc_parts:-$lxc_root_sfs 15-settings 20-scripts 40-home $lxc_src_sfs} \
+    "$wd/RW"
   rebuild_sh="/etc/profile.d/rebuild-$$.sh"
   apt_conf="/etc/apt/apt.conf.d/99rebuild-conf"
   echo "APT::Get::List-Cleanup off;" >"$lxc_root$apt_conf"
@@ -67,6 +71,10 @@ while test -n "$1" -a -z "${1##--*}";do
     --relink) relink="yes"; shift;;
     --auto) auto_commands="${auto_commands}${_nl} rebuild-auto;"; auto_rebuild="yes"; shift;;
     --lxc) use_lxc="yes"; shift;;
+    --lxc=*)
+      lxc_parts="${1#--lxc=}"
+      use_lxc="yes";
+      shift;;
     --lxc-bind) lxc_bind="${lxc_bind:+$lxc_bind$_nl}$2"; shift 2;;
     --help) usage; exit 0;;
     *) echo "Unknown option: '$1'" >&2; exit 1;;
