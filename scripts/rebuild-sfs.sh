@@ -179,8 +179,8 @@ run_shell() {
       -s lxc.utsname="rebuild-$sname" \
       -s lxc.rootfs="$lxc_root" \
       -s lxc.network.type=none \
-      -s lxc.mount.entry="$(find_apt_fullpath "Dir::Cache::archives") var/cache/apt/archives none bind 0 0" \
-      -s lxc.mount.entry="$(find_apt_fullpath "Dir::State::lists") var/lib/apt/lists none bind 0 0" \
+      -s lxc.mount.entry="$(find_apt_fullpath "Dir::Cache::archives" | sed -e 's/ /\\040/g') var/cache/apt/archives none bind 0 0" \
+      -s lxc.mount.entry="$(find_apt_fullpath "Dir::State::lists" | sed -e 's/ /\\040/g') var/lib/apt/lists none bind 0 0" \
       ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=${mnt%=*} ${mnt##*=} none bind,ro 0 0";done)} \
       -- su - root
     )
