@@ -104,7 +104,7 @@ test -z "$auto_rebuild" -o -n "$out" -o ! -s "$src" || {
 }
 
 case "$src" in
-    git://*|http://*.git|https://*.git|file://*.git)
+    git://*|http://*.git|https://*.git|file://*.git|git+*)
       git_src="$src"
       src="$(dl_file "$src")"
       echo "Source directory: $src"
