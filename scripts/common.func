@@ -136,7 +136,7 @@ unpack_deb() {
     while read div_src; do
       read div_dst
       read div_pkg
-      test -e "$dst_dir/$div_src" || continue
+      test -e "$dst_dir/$div_src" -o -L "$dst_dir/$div_src" || continue
       echo "Diverting for $div_pkg: $div_src -> $div_dst" >&2
       mkdir -p "$dst_dir/${div_dst%/*}"
       mv "$dst_dir/$div_src" "$dst_dir/$div_dst"
