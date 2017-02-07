@@ -61,8 +61,30 @@ trap unmount_tmp EXIT
 
 for sfs;do
   if test -d "$sfs";then
+    aufs_parts="$(aufs_parts "$sfs" | tac)"
     IFS="$_nl"
-    "$0" $(find "$sfs" -mindepth 1 -name "*.sfs" -not -lname "*/*")
+    if test -n "$aufs_parts";then
+      for aufs_part in $aufs_parts;do
+        IFS="$IFS_save"
+        if ! back_sfs="$(file2dev "$aufs_part")";then
+          echo "Cannot determine backing file for $aufs_part, skipping.." >&2
+          continue
+        fi
+        case "$back_sfs" in
+          *.sfs) ;;
+          *.sfs.*) back_sfs="${back_sfs%.sfs.*}.sfs" ;;
+          *)
+            echo "$back_sfs does not seem to be like a .sfs file, skipping.." >&2
+            continue
+          ;;
+        esac
+        test -e "$back_sfs" || { echo "Skipping non-existant $back_sfs" >&2; continue; }
+        "$0" "$back_sfs"
+        aufs_update_sfs_branch "$aufs_part"
+      done
+    else
+      "$0" $(find "$sfs" -mindepth 1 -name "*.sfs" -not -lname "*/*")
+    fi
     IFS="$IFS_save"
     continue
   fi
