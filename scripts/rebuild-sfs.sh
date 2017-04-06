@@ -41,6 +41,7 @@ alias rebuild-cancel="exit 1"
 alias rebuild-reenter="exit 100"
 alias rebuild-auto="$lbu_scripts/rebuild-destdir.sh && exit 0"
 cd "\$DESTDIR"
+test -z "$auto_rebuild" -o -e /root/.auto-rebuilt || { touch /root/.auto-rebuilt; rebuild-auto; }
 EOF
 }
 
