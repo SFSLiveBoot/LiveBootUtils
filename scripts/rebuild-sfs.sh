@@ -123,7 +123,7 @@ if test -d "$src";then
         echo "Source in AUFS with multiple backends, please set dl_cache_dir env var to non-aufs location" >&2
         echo "Detected backends of '$src':" >&2
         echo "$src_orig" | sed -e 's/^/  /g' >&2
-        echo "Possibly good locations: $(grep -w -e tmpfs -e ext[2-4] /proc/mounts  | cut -f2 -d" " | tr \\n " ")" >&2
+        echo "Possibly good locations: $(grep -w -e tmpfs -e "ext[2-4]" /proc/mounts  | cut -f2 -d" " | tr \\n " ")" >&2
         exit 1
       }
       src="$src_orig"
