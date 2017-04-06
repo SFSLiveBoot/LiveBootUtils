@@ -91,6 +91,7 @@ out="$2"
 
 : ${sfs_gitloc:=usr/src/sfs.d/.git-source}
 : ${sfs_gitcid:=usr/src/sfs.d/.git-commit}
+: ${sfs_lxc_parts:=usr/src/sfs.d/.lxc-build-parts}
 
 sfs_git_source() {
   local tmp="$(mktemp -u -d -t unsquash-$$.XXXXXX)" src="$1" git_src
@@ -119,6 +120,10 @@ test -r "$src" || { usage >&2; exit 1; }
 
 if test -d "$src";then
   test -n "$out" || { echo "With src as directory output file is mandatory" >&2; exit 1; }
+  test ! -e "$src/$sfs_lxc_parts" || {
+    test -n "${use_lxc+set}" || use_lxc="yes"
+    test ! -s "$src/$sfs_lxc_parts" -o "${lxc_parts+set}" || read lxc_parts < "$src/$sfs_lxc_parts"
+  }
   case "$(mnt2dev $(file2mnt "$src") 3)" in
     aufs)
       src_orig="$(aufs_orig "$src")"
