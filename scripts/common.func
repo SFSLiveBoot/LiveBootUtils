@@ -646,7 +646,7 @@ cat_file() {
   esac
 }
 
-: ${dl_cache_dir:=$HOME/.cache/${cache_name:-lbu}}
+: ${dl_cache_dir:=$HOME/.cache/lbu/dl}
 
 dl_file() {
   local url="$1"
