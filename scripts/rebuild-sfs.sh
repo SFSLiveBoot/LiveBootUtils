@@ -164,6 +164,10 @@ else
   build_lxc_root
 fi
 
+fstab_escape() {
+  echo "$1" | sed -e 's/ /\\040/g'
+}
+
 run_shell() {
   if test -n "$use_lxc";then
     find "$lxc_rw" -depth \
@@ -174,14 +178,14 @@ run_shell() {
       -delete
     mount -o remount "$lxc_root"
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    test -z "$lxc_bind" || for mnt in $lxc_bind;do mkdir -p "$lxc_root/${mnt##*=}" ;done
+    test -z "$lxc_bind" || (IFS="$_nl"; for mnt in $lxc_bind;do mkdir -p "$lxc_root/${mnt##*=}" ;done)
     (IFS="$_nl"; lxc-execute -n "rebuild-$sname" -l debug \
       -s lxc.utsname="rebuild-$sname" \
       -s lxc.rootfs="$lxc_root" \
       -s lxc.network.type=none \
-      -s lxc.mount.entry="$(find_apt_fullpath "Dir::Cache::archives" | sed -e 's/ /\\040/g') var/cache/apt/archives none bind 0 0" \
-      -s lxc.mount.entry="$(find_apt_fullpath "Dir::State::lists" | sed -e 's/ /\\040/g') var/lib/apt/lists none bind 0 0" \
-      ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=${mnt%=*} ${mnt##*=} none bind,ro 0 0";done)} \
+      -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::Cache::archives")") var/cache/apt/archives none bind 0 0" \
+      -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::State::lists")") var/lib/apt/lists none bind 0 0" \
+      ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=$(fstab_escape "${mnt%=*}") $(fstab_escape "${mnt##*=}") none bind,ro 0 0";done)} \
       -- su - root
     )
   else
