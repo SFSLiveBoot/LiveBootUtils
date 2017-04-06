@@ -35,7 +35,7 @@ EOF
 cat_rebuild_sh() {
   cat <<EOF
 . "${_cf:-$lbu_scripts/common.func}"
-export DESTDIR="$DESTDIR" TERM="$TERM"
+export DESTDIR="$DESTDIR" TERM="$TERM" lbu="$lbu" dl_cache_dir="/$lxc_dl_cache"
 alias rebuild-finalize="exit 0"
 alias rebuild-cancel="exit 1"
 alias rebuild-reenter="exit 100"
@@ -65,6 +65,8 @@ build_lxc_root() {
 _nl='
 '
 auto_commands=' . "$_rsh"; PS1="$_bp";'
+: ${lxc_bind=$lbu=${lbu#/}}
+: ${lxc_dl_cache:=root/.cache/lbu/dl}
 
 while test -n "$1" -a -z "${1##--*}";do
   case "$1" in
@@ -179,12 +181,14 @@ run_shell() {
     mount -o remount "$lxc_root"
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
     test -z "$lxc_bind" || (IFS="$_nl"; for mnt in $lxc_bind;do mkdir -p "$lxc_root/${mnt##*=}" ;done)
+    mkdir -p "$lxc_root/$lxc_dl_cache"
     (IFS="$_nl"; lxc-execute -n "rebuild-$sname" -l debug \
       -s lxc.utsname="rebuild-$sname" \
       -s lxc.rootfs="$lxc_root" \
       -s lxc.network.type=none \
       -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::Cache::archives")") var/cache/apt/archives none bind 0 0" \
       -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::State::lists")") var/lib/apt/lists none bind 0 0" \
+      -s lxc.mount.entry="$(fstab_escape "$dl_cache_dir") $lxc_dl_cache none bind 0 0" \
       ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=$(fstab_escape "${mnt%=*}") $(fstab_escape "${mnt##*=}") none bind,ro 0 0";done)} \
       -- su - root
     )
