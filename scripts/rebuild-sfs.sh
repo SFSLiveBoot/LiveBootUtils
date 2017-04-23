@@ -74,8 +74,37 @@ build_lxc_container() {
     $(IFS="$_nl"; for mnt in $lxc_bind; do echo "--bind-ro=$mnt";done)
 }
 
+sfs_git_source() {
+  local tmp="$(mktemp -u -d -t unsquash-$$.XXXXXX)" src="$1" git_src
+  unsquashfs -n -d "$tmp" "$src" $sfs_gitloc >&2
+  git_src="$(cat "$tmp/$sfs_gitloc")"
+  rm -r "$tmp"
+  test -n "$git_src" || return 1
+  echo "$git_src"
+}
+
+run_shell() {
+  local ret
+  if test -n "$use_lxc";then
+    case "$(lxc-info -n "$lxc_name")" in
+      *STOPPED*)
+        lxc-start -n "$lxc_name" -d -- sleep 7200 || return $?
+      ;;
+    esac
+    echo "After adding files to \$DESTDIR, run: mount -o remount /"
+    lxc-attach -n "$lxc_name" -- su - root
+    ret=$?
+    mount -o remount "$DESTDIR"
+  else
+    echo "$auto_commands" | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
+    ret=$?
+  fi
+  return $ret
+}
+
 _nl='
 '
+
 auto_commands=' . "$_rsh"; PS1="$_bp";'
 : ${lxc_bind=$lbu=${lbu#/}}
 : ${lxc_dl_cache:=root/.cache/lbu/dl}
@@ -103,15 +132,6 @@ out="$2"
 : ${sfs_gitloc:=usr/src/sfs.d/.git-source}
 : ${sfs_gitcid:=usr/src/sfs.d/.git-commit}
 : ${sfs_lxc_parts:=usr/src/sfs.d/.lxc-build-parts}
-
-sfs_git_source() {
-  local tmp="$(mktemp -u -d -t unsquash-$$.XXXXXX)" src="$1" git_src
-  unsquashfs -n -d "$tmp" "$src" $sfs_gitloc >&2
-  git_src="$(cat "$tmp/$sfs_gitloc")"
-  rm -r "$tmp"
-  test -n "$git_src" || return 1
-  echo "$git_src"
-}
 
 test -z "$auto_rebuild" -o -n "$out" -o ! -s "$src" || {
   out="$src"
@@ -183,25 +203,6 @@ if test -z "$use_lxc";then
 elif test -z "$lxc_name"; then
   build_lxc_container
 fi
-
-run_shell() {
-  local ret
-  if test -n "$use_lxc";then
-    case "$(lxc-info -n "$lxc_name")" in
-      *STOPPED*)
-        lxc-start -n "$lxc_name" -d -- sleep 7200 || return $?
-      ;;
-    esac
-    echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    lxc-attach -n "$lxc_name" -- su - root
-    ret=$?
-    mount -o remount "$DESTDIR"
-  else
-    echo "$auto_commands" | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
-    ret=$?
-  fi
-  return $ret
-}
 
 cat <<EOF
 DESTDIR=$DESTDIR
