@@ -1,5 +1,7 @@
 #!/bin/sh
 
+: ${lbu:=/opt/LiveBootUtils}
+
 set -e
 
 veth_up_script='iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off'
@@ -98,7 +100,7 @@ lxc.kmsg = 0
 lxc.loglevel = 1
 lxc.autodev = 1
 lxc.mount.auto = proc sys
-lxc.hook.pre-mount = /etc/lxc/mount-sfs.sh $def_parts $@ --
+lxc.hook.pre-mount = $lbu/lxc-mount-sfs.sh $def_parts $@ --
 
 # use .drop instead of .keep if you want less restritive environment
 #lxc.cap.drop = sys_module mac_admin mac_override sys_time
