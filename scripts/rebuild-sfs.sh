@@ -10,9 +10,15 @@ set -e
 
 on_exit() {
   lsof +d "$wd" "$wd"/* || true
-  test -z "$lxc_root" || {
-    umount "$lxc_root/$DESTDIR" "$lxc_root" "$lxc_rw"
-    rmdir "$lxc_root" "$lxc_rw"
+  case "$lxc_name" in
+    rebuild-$sname-$$.*)
+        case "$(lxc-info -n "$lxc_name")" in *RUNNING*) lxc-stop -k -n "$lxc_name";;esac
+        lxc-destroy -n "$lxc_name"
+    ;;
+  esac
+  test ! -d "$lxc_conf" || {
+    if mountpoint -q "$lxc_conf";then umount "$lxc_conf";fi
+    rmdir "$lxc_conf"
   }
   test ! -e "$rebuild_sh" || rm "$rebuild_sh"
   unmount_below "$wd" && rmdir "$wd"/* "$wd"
@@ -45,22 +51,27 @@ test -z "$auto_rebuild" -o -e /root/.auto-rebuilt || { touch /root/.auto-rebuilt
 EOF
 }
 
-build_lxc_root() {
-  lxc_root="$(mktemp -d /tmp/rebuild-lxc-root.$$.XXXXXX)"
-  lxc_rw="$(mktemp -d /tmp/rebuild-lxc-rw.$$.XXXXXX)"
-  : ${lxc_root_sfs:=$(basename $(file2dev /bin/ls) | sed -e 's@\.sfs[.OLD0-9]*@@')}
-  : ${lxc_src_sfs:=$wd/$(basename "$src" .sfs)}
-  echo "lxc_rw=$lxc_rw"
-  mount -t tmpfs -o mode=0755 lxc-rw "$lxc_rw"
-  LXC_ROOTFS_PATH="$lxc_root" LXC_ROOT_RW="$lxc_rw" /etc/lxc/mount-sfs.sh \
-    ${lxc_parts:-$lxc_root_sfs 15-settings 20-scripts 40-home $lxc_src_sfs} \
-    "$wd/RW"
+build_lxc_container() {
+  : ${root_sfs:=$(basename $(file2dev /bin/ls) | sed -e 's@\.sfs[.OLD0-9]*@@')}
+  lxc_name="$(basename "$(mktemp -d -u /var/lib/lxc/rebuild-$sname-$$.XXXXXX)")"
+  lxc_conf="$(mktemp -d /tmp/rebuild-$sname-conf.$$.XXXXXX)"
+
+  mount -t tmpfs -o mode=0755 lxc-conf "$lxc_conf"
   rebuild_sh="/etc/profile.d/rebuild-$$.sh"
   apt_conf="/etc/apt/apt.conf.d/99rebuild-conf"
-  echo "APT::Get::List-Cleanup off;" >"$lxc_root$apt_conf"
-  cat_rebuild_sh >"$lxc_root$rebuild_sh"
-  mkdir -p "$lxc_root/$DESTDIR"
-  mount --bind "$DESTDIR" "$lxc_root/$DESTDIR"
+  mkdir -p "$lxc_conf${rebuild_sh%/*}" "$lxc_conf${apt_conf%/*}" "$lxc_conf$DESTDIR" "$lxc_conf/$lxc_dl_cache" \
+    $(IFS="$_nl"; for mnt in $lxc_bind; do echo "$lxc_conf/${mnt#*=}";done)
+  echo "APT::Get::List-Cleanup off;" >"$lxc_conf$apt_conf"
+  cat_rebuild_sh >"$lxc_conf$rebuild_sh"
+
+  lxc-create -t sfs -n "$lxc_name" -- \
+    --default-parts="${lxc_parts:-$root_sfs settings scripts home}" --host-network \
+    "$lxc_conf" "$mnt_src" "$wd/RW" \
+    --bind "$(find_apt_fullpath "Dir::Cache::archives")=var/cache/apt/archives" \
+    --bind "$(find_apt_fullpath "Dir::State::lists")=var/lib/apt/lists" \
+    --bind "$dl_cache_dir=$lxc_dl_cache" \
+    --bind "$DESTDIR=${DESTDIR#/}" \
+    $(IFS="$_nl"; for mnt in $lxc_bind; do echo "--bind-ro=$mnt";done)
 }
 
 _nl='
@@ -155,6 +166,7 @@ trap on_exit EXIT
 chmod 755 $wd
 
 mount_combined "$wd" "$src"
+mnt_src="$src"
 test ! -d "$src" || { src="$out"; out=""; }
 DESTDIR="$wd/ALL"
 sname="$(basename "${out:-$src}" .sfs)"
@@ -168,39 +180,27 @@ test -n "${sfs_exclude_file+yes}" -o ! -e "$DESTDIR/usr/src/sfs.d/.sqfs-exclude"
 if test -z "$use_lxc";then
   rebuild_sh="$(mktemp /tmp/rebuild-$$.XXXXXX.sh)"
   DESTDIR="$DESTDIR" _cf="$lbu_scripts/common.func" cat_rebuild_sh >"$rebuild_sh"
-else
-  build_lxc_root
+elif test -z "$lxc_name"; then
+  build_lxc_container
 fi
 
-fstab_escape() {
-  echo "$1" | sed -e 's/ /\\040/g'
-}
-
 run_shell() {
+  local ret
   if test -n "$use_lxc";then
-    find "$lxc_rw" -depth \
-      $(d="$lxc_rw" IFS=/;for x in $DESTDIR; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
-      $(d="$lxc_rw" IFS=/;for x in $rebuild_sh; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
-      $(d="$lxc_rw" IFS=/;for x in $apt_conf; do d="$d${x:+/$x}"; echo -not -path "$d";done) \
-      -not -path "$lxc_rw/.wh..wh.????" \
-      -delete
-    mount -o remount "$lxc_root"
+    case "$(lxc-info -n "$lxc_name")" in
+      *STOPPED*)
+        lxc-start -n "$lxc_name" -d -- sleep 7200 || return $?
+      ;;
+    esac
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    test -z "$lxc_bind" || (IFS="$_nl"; for mnt in $lxc_bind;do mkdir -p "$lxc_root/${mnt##*=}" ;done)
-    mkdir -p "$lxc_root/$lxc_dl_cache"
-    (IFS="$_nl"; lxc-execute -n "rebuild-$sname" -l debug \
-      -s lxc.utsname="rebuild-$sname" \
-      -s lxc.rootfs="$lxc_root" \
-      -s lxc.network.type=none \
-      -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::Cache::archives")") var/cache/apt/archives none bind 0 0" \
-      -s lxc.mount.entry="$(fstab_escape "$(find_apt_fullpath "Dir::State::lists")") var/lib/apt/lists none bind 0 0" \
-      -s lxc.mount.entry="$(fstab_escape "$dl_cache_dir") $lxc_dl_cache none bind 0 0" \
-      ${lxc_bind:+$(for mnt in $lxc_bind;do echo -s;echo "lxc.mount.entry=$(fstab_escape "${mnt%=*}") $(fstab_escape "${mnt##*=}") none bind,ro 0 0";done)} \
-      -- su - root
-    )
+    lxc-attach -n "$lxc_name" -- su - root
+    ret=$?
+    mount -o remount "$DESTDIR"
   else
     echo "$auto_commands" | env _rsh="$rebuild_sh" _bp="$build_prompt" bash -i
+    ret=$?
   fi
+  return $ret
 }
 
 cat <<EOF
