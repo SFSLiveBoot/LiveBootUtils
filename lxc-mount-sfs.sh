@@ -18,23 +18,14 @@ test "x$(mnt2dev $(file2mnt "$LXC_ROOT_RW") 3)" != "xaufs" ||
   mount -t tmpfs -o mode=0755 mem "$LXC_ROOT_RW"
 mount -t aufs -o dirs="$LXC_ROOT_RW"=rw root "$r"
 
+die() {
+  echo "ERROR: $*" >&2
+  umount "$r"
+  exit 1
+}
+
 for part; do
   test ! "x$part" = "x--" || break
-  sfs_mnt=""
-  for sfs in $(case "$part" in /*) echo "$part" ;; *) find "$dist_d" \( -path "*/$part"  -o -name "${part}.sfs" -o -name "[0-9][0-9]-${part}.sfs" \) -not -name "*.sfs.*";;esac);do
-    if test -d "$sfs";then sfs_mnt="$sfs"
-    else
-      sfs_mnt="/.parts/$(basename "$sfs" .sfs)"
-      mountpoint -q "$sfs_mnt" || {
-        mkdir -p "$sfs_mnt"
-        mount -o loop,ro "$sfs" "$sfs_mnt"
-      }
-    fi
-    mount -o remount,ins:1:"$sfs_mnt" "$r"
-  done
-  test -n "$sfs_mnt" || {
-    echo "Error: '$part' part not found" >&2
-    umount "$r"
-    exit 1
-  }
+  sfs_mnt="$("$lbu/scripts/sfs-mount.sh" "$part")" || die "Cannot find mount for $part"
+  mount -o remount,ins:1:"$sfs_mnt" "$r" || die "Cannot mount $sfs_mnt"
 done
