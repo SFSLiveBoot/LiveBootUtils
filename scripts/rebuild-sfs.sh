@@ -88,7 +88,7 @@ run_shell() {
   if test -n "$use_lxc";then
     case "$(lxc-info -n "$lxc_name")" in
       *STOPPED*)
-        lxc-start -n "$lxc_name" -d -- sleep 7200 || return $?
+        lxc-start -n "$lxc_name" -d -l info -- sleep 7200 || return $?
       ;;
     esac
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
