@@ -50,6 +50,7 @@ sfs_latest_file() {
 
 mounted_path() {
   local bf file="$1" loop mnt
+  file="$(readlink -f "$file")"
   for loop in /sys/block/loop*/loop/backing_file;do
     read bf < $loop
     if test "x$file" = "x$bf";then
@@ -94,8 +95,11 @@ mount_part_file() {
 
 find_part_distfile() {
   local name="$1"
- : ${dist_path:=$(dirname "$(file2dev /bin/ls)" | tail -1)}
- ret="$(find "$dist_path" \( -path "*/$name" -o -name "${name}.sfs" -o -name "[0-9][0-9]-${name}.sfs" \) -not -name "*.sfs.*" | head -1)"
+  local IFS_save="$IFS"
+  IFS="
+"
+ ret="$(find $(for part in $(aufs_parts /); do file2dev "$part";done | grep -v ^/dev/ | xargs dirname | sort -u) \( -path "*/$name" -o -name "${name}.sfs" -o -name "[0-9][0-9]-${name}.sfs" \) -not -name "*.sfs.*" | head -1)"
+ IFS="$IFS_save"
  test -n "$ret" || return 1
  echo "$ret"
 }
