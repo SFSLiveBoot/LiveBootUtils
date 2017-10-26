@@ -98,7 +98,7 @@ run_shell() {
       ;;
     esac
     echo "After adding files to \$DESTDIR, run: mount -o remount /"
-    lxc-attach -n "$lxc_name" -- su - root
+    lxc-attach -n "$lxc_name" -- su -p -l root
     ret=$?
     mount -o remount "$DESTDIR"
   else
