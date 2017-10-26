@@ -33,7 +33,7 @@ apt-get ${target_dist:+-t $target_dist} download --print-uris $(required_debpkg 
   test -z "$show_only" || { echo; continue; }
   case "$url" in
     file:///*) deb_file="${url#file://}" ;;
-    http://*|ftp://*)
+    https://*|http://*|ftp://*)
       test -s "$cache_dir/$fname" || {
         touch "$cache_dir/$fname"
         curl -L -o "$cache_dir/partial/$fname" "$url"
