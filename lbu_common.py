@@ -319,7 +319,7 @@ class MountPoint(FSPath):
         if not self.fs_type=="aufs": raise ValueError("Mountpoint is not aufs", self.path)
         components=[]
         glob_prefix="/sys/fs/aufs/si_%s/br"%(self.aufs_si,)
-        for branch_file in glob.glob(glob_prefix + "[0-9]*"):
+        for branch_file in sorted(glob.glob(glob_prefix + "[0-9]*"), key=lambda v: int(v[len(glob_prefix):])):
             branch_dir, branch_mode=open(branch_file).read().strip().rsplit("=", 1)
             components.append(FSPath(branch_dir, aufs_mode=branch_mode, aufs_index=int(branch_file[len(glob_prefix):])))
         return components
