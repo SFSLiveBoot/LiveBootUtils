@@ -342,6 +342,24 @@ class MountPoint(FSPath):
 
 
 @cli_func
+def aufs_components(directory='/'):
+    fn_ts_re = re.compile(r'^(.+)\.([0-9]+)$')
+    mntpnt=MountPoint(directory)
+    for c in mntpnt.aufs_components:
+        c_mnt=c.mountpoint
+        try: lbe=c_mnt.loop_backend
+        except NotLoopDev:
+            print "%s/"%c
+            continue
+        m = fn_ts_re.match(lbe)
+        if m:
+            lbe_bn = m.group(1)
+            if os.path.exists(lbe_bn) and os.path.samefile(lbe_bn, lbe):
+                lbe = lbe_bn
+        print lbe
+
+
+@cli_func
 def get_root_sfs():
     test_file=FSPath("/bin/true")
     root_backend=SFSFile(test_file.backend)
