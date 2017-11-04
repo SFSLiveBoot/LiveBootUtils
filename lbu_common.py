@@ -16,6 +16,10 @@ class CommandFailed(EnvironmentError): pass
 class FilesystemError(LookupError): pass
 
 
+class NotAufs(ValueError): pass
+class NotLoopDev(ValueError): pass
+class NotSFS(ValueError): pass
+
 class UTC(datetime.tzinfo):
     def utcoffset(self, dt):
         return datetime.timedelta(0)
@@ -249,7 +253,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def sfs_directory(self):
-        if not self.validate_sfs(): raise ValueError("Not a SFS file", self.path)
+        if not self.validate_sfs(): raise NotSFS("Not a SFS file", self.path)
         return SFSDirectory(self._parent_path)
 
     @cached_property
@@ -316,7 +320,7 @@ class MountPoint(FSPath):
 
     @cached_property
     def aufs_components(self):
-        if not self.fs_type=="aufs": raise ValueError("Mountpoint is not aufs", self.path)
+        if not self.fs_type=="aufs": raise NotAufs("Mountpoint is not aufs", self.path)
         components=[]
         glob_prefix="/sys/fs/aufs/si_%s/br"%(self.aufs_si,)
         for branch_file in sorted(glob.glob(glob_prefix + "[0-9]*"), key=lambda v: int(v[len(glob_prefix):])):
@@ -333,7 +337,7 @@ class MountPoint(FSPath):
     @cached_property
     def loop_backend(self):
         loop_name=self.mount_source.split(os.path.sep)[-1]
-        if not loop_name.startswith("loop"): raise ValueError("Mountpoint does not seem to be loop device", loop_name)
+        if not loop_name.startswith("loop"): raise NotLoopDev("Mountpoint does not seem to be loop device", loop_name)
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
 
@@ -471,5 +475,5 @@ def sfs_stamp_file(f):
     try: d=f.read(1024)
     finally:
         if close: f.close()
-    if d[:4]!="hsqs": raise ValueError("file does not have sqsh signature")
+    if d[:4]!="hsqs": raise NotSFS("file does not have sqsh signature")
     return struct.unpack("<I", d[8:8 + 4])[0]
