@@ -15,9 +15,17 @@ else:
     logging.addLevelName(logging.WARNING, "{yellow}{level}{reset}".format(level=logging.getLevelName(logging.WARNING), **_log_colors))
     logging.addLevelName(logging.ERROR, "{red}{level}{reset}".format(level=logging.getLevelName(logging.ERROR), **_log_colors))
 
-@cli_func
-def update_sfs(source_dir, *target_dirs):
-    """{--list | <source_dir>} [<target_dirs>...]"""
+
+def update_sfs_parse_args(argv):
+    if argv[0] == '--no-act':
+        return [argv[1], True] + argv[2:], {}
+    else:
+        return [argv[0], False] + argv[1:], {}
+
+
+@cli_func(parse_argv=update_sfs_parse_args)
+def update_sfs(source_dir, no_act=False, *target_dirs):
+    """[--no-act] {--list | <source_dir>} [<target_dirs>...]"""
     if source_dir == '--list':
         list_mode = True
     else:
@@ -46,7 +54,8 @@ def update_sfs(source_dir, *target_dirs):
             elif src_sfs.create_stamp > dst_sfs.create_stamp:
                 info("Replacing %s from %s: %s > %s", dst_sfs.basename, src_sfs.parent_directory,
                      stamp2txt(src_sfs.create_stamp), stamp2txt(dst_sfs.create_stamp))
-                dst_sfs.replace_with(src_sfs, progress_cb=CLIProgressReporter(src_sfs.file_size))
+                if not no_act:
+                    dst_sfs.replace_with(src_sfs, progress_cb=CLIProgressReporter(src_sfs.file_size))
             elif src_sfs.create_stamp == dst_sfs.create_stamp:
                 info("Keeping same %s: %s", dst_sfs.basename, stamp2txt(src_sfs.create_stamp))
             else:
