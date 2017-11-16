@@ -17,7 +17,12 @@ else:
 
 @cli_func
 def update_sfs(source_dir, *target_dirs):
-    source_dir=SFSDirectory(source_dir)
+    """{--list | <source_dir>} [<target_dirs>...]"""
+    if source_dir == '--list':
+        list_mode = True
+    else:
+        source_dir = SFSDirectory(source_dir)
+        list_mode = False
     target_dirs=map(SFSDirectory, target_dirs)
     if not target_dirs: target_dirs=(get_root_sfs().sfs_directory, )
     for target_dir in target_dirs:
@@ -32,6 +37,9 @@ def update_sfs(source_dir, *target_dirs):
                     info("Skipping non-local symlink: %s -> %s", sfs_name, sfs.symlink_target)
                     continue
             except OSError: pass
+            if list_mode:
+                print sfs.path
+                continue
             src_sfs=source_dir.find_sfs(sfs_name)
             if src_sfs is None:
                 warn("Not found from update source, skipping: %s", sfs_name)
