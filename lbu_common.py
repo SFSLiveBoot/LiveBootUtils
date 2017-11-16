@@ -141,6 +141,31 @@ class SFSDirectory(object):
                 return sfs
 
 
+class SFSDirectoryAufs(SFSDirectory):
+    def __init__(self, backend='/'):
+        if not isinstance(backend, MountPoint):
+            backend = MountPoint(backend)
+        SFSDirectory.__init__(self, backend)
+
+    @cached_property
+    def all_sfs(self):
+        ret = []
+        for component in self.backend.aufs_components:
+            try:
+                c_file = SFSFile(component.mountpoint.loop_backend)
+            except NotLoopDev:
+                continue
+            try:
+                c_file.validate_sfs()
+            except NotSFS:
+                continue
+            ret.append(c_file.curlink_sfs(False))
+        return ret
+
+    def find_sfs(self, name):
+        return SFSDirectory.find_sfs(self, name).curlink_sfs(True)
+
+
 class FSPath(object):
     walk_hidden=False
 
@@ -250,6 +275,18 @@ class SFSFile(FSPath):
     def validate_sfs(self):
         if not os.path.isfile(self.path): return False
         return self.open().read(4)=="hsqs"
+
+    fn_ts_re = re.compile(r'^(.+?)(?:(\.OLD)?\.([0-9]+))+$')
+
+    def curlink_sfs(self, prefer_newlink=True):
+        """prefer_newlink: prefer current properly named symlink over actually same file"""
+        ts_m = self.fn_ts_re.match(self.path)
+        if ts_m:
+            linkname = ts_m.group(1)
+            if os.path.exists(linkname):
+                if prefer_newlink or os.path.samefile(linkname, self.path):
+                    return SFSFile(linkname)
+        return self
 
     @cached_property
     def sfs_directory(self):
@@ -382,7 +419,7 @@ def mountpoint_x(dev):
 def blkid2mnt(blkid):
     with open("/proc/mounts") as proc_mounts:
         for a, b, c in map(lambda line: line.split(None, 2), proc_mounts):  # @UnusedVariable
-            try: 
+            try:
                 if mountpoint_x(a)==blkid:
                     return b.replace("\\040", " ")
             except OSError: pass

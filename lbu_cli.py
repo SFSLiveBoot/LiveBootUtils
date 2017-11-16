@@ -3,7 +3,7 @@
 from logging import info, warn, error
 import logging
 import subprocess
-from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt, cli_func
+from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt, cli_func, SFSDirectoryAufs
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -24,34 +24,34 @@ def update_sfs(source_dir, *target_dirs):
         source_dir = SFSDirectory(source_dir)
         list_mode = False
     target_dirs=map(SFSDirectory, target_dirs)
-    if not target_dirs: target_dirs=(get_root_sfs().sfs_directory, )
+    if not target_dirs: target_dirs=(SFSDirectoryAufs(), )
     for target_dir in target_dirs:
         last_dir=None
         for sfs in target_dir.all_sfs:
             if not sfs.parent_directory == last_dir:
                 last_dir=sfs.parent_directory
                 info("Processing directory: %s", last_dir)
-            sfs_name=sfs.basename
             try:
                 if "/" in sfs.symlink_target:
-                    info("Skipping non-local symlink: %s -> %s", sfs_name, sfs.symlink_target)
+                    info("Skipping non-local symlink: %s -> %s", sfs.basename, sfs.symlink_target)
                     continue
             except OSError: pass
             if list_mode:
                 print sfs.path
                 continue
-            src_sfs=source_dir.find_sfs(sfs_name)
+            dst_sfs = sfs.curlink_sfs()
+            src_sfs=source_dir.find_sfs(dst_sfs.basename)
             if src_sfs is None:
-                warn("Not found from update source, skipping: %s", sfs_name)
-            elif src_sfs.create_stamp > sfs.create_stamp:
-                info("Replacing %s from %s: %s > %s", sfs_name, src_sfs.parent_directory,
-                     stamp2txt(src_sfs.create_stamp), stamp2txt(sfs.create_stamp))
-                sfs.replace_with(src_sfs, progress_cb=CLIProgressReporter(src_sfs.file_size))
-            elif sfs.create_stamp == sfs.create_stamp:
-                info("Keeping same %s: %s", sfs_name, stamp2txt(src_sfs.create_stamp))
+                warn("Not found from update source, skipping: %s", dst_sfs.basename)
+            elif src_sfs.create_stamp > dst_sfs.create_stamp:
+                info("Replacing %s from %s: %s > %s", dst_sfs.basename, src_sfs.parent_directory,
+                     stamp2txt(src_sfs.create_stamp), stamp2txt(dst_sfs.create_stamp))
+                dst_sfs.replace_with(src_sfs, progress_cb=CLIProgressReporter(src_sfs.file_size))
+            elif src_sfs.create_stamp == dst_sfs.create_stamp:
+                info("Keeping same %s: %s", dst_sfs.basename, stamp2txt(src_sfs.create_stamp))
             else:
                 warn("Keeping newer %s: %s < %s",
-                     sfs_name, stamp2txt(src_sfs.create_stamp), stamp2txt(sfs.create_stamp))
+                     dst_sfs.basename, stamp2txt(src_sfs.create_stamp), stamp2txt(dst_sfs.create_stamp))
 
 
 if __name__ == '__main__':
