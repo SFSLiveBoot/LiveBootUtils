@@ -6,8 +6,13 @@ import fnmatch, glob, re
 import subprocess
 import urllib2
 import datetime
+from Crypto.Hash import MD5
 
-from logging import warn
+from logging import warn, info
+
+import fcntl
+
+import errno
 
 
 class CommandFailed(EnvironmentError): pass
@@ -256,10 +261,132 @@ class FSPath(object):
             warn("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
         clear_cached_properties(self)
 
+    @property
+    def loop_dev(self):
+        for devname in os.listdir('/sys/block'):
+            if not devname.startswith('loop'):
+                continue
+            try: bfile = open('/sys/block/%s/loop/backing_file'%(devname,)).read().strip()
+            except IOError:
+                continue
+            if not os.path.exists(bfile):
+                continue
+            if not os.path.samefile(bfile, self.path):
+                continue
+            if not int(open('/sys/block/%s/loop/offset'%(devname,)).read().strip())==0:
+                continue
+            return '/dev/%s'%(devname,)
+
+
+class MountInfo(object):
+    def __init__(self, mountinfo='/proc/self/mountinfo'):
+        self.minfo = mountinfo
+        self._mnt_cache = {}
+
+    def __iter__(self):
+        with open(self.minfo) as minfo_fobj:
+            for line in minfo_fobj:
+                ret = self.proc_mountinfo_line(line)
+                yield ret
+
+    @staticmethod
+    def proc_mountinfo_line(line):
+        parts=line.rstrip('\n').split(' ')
+        ret = dict(mount_id=int(parts[0]), parent_id=int(parts[1]),
+                   st_dev=reduce(lambda a, b: (a<<8)+b, map(int, parts[2].split(':'))),
+                   root=parts[3].decode("string_escape"), mnt=parts[4].decode("string_escape"),
+                   opts_mnt=set(parts[5].split(",")), opt_fields=set())
+        idx=6
+        while not parts[idx]=='-':
+            ret['opt_fields'].add(parts[idx])
+            idx+=1
+        ret["fs_type"] = parts[idx+1]
+        ret["dev"] = None if parts[idx+2]=='none' else parts[idx+2]
+        ret["opts"] = set(parts[idx+3].split(","))
+        return ret
+
+    @cached_property
+    def entries(self):
+        return list(self)
+
+    def find_dev(self, dev_name=None, dev_id=None):
+        if dev_id is None:
+            dev_id = os.stat(dev_name).st_rdev
+        for entry in self.entries:
+            if entry["st_dev"] == dev_id:
+                return entry
+
+
+global_mountinfo = MountInfo()
+
+
+class GitRepo(FSPath):
+    @cached_property
+    def last_commit(self):
+        return run_command(['git', 'log', '-1', '--format=%H'], cwd=self.path)
+
+    @cached_property
+    def last_stamp(self):
+        return int(run_command(['git', 'log', '-1', '--format=%ct'], cwd=self.path))
+
+
+class Downloader(object):
+    git_url_re = re.compile(r'(^git://.*?|^git\+.*?|.*?\.git)(?:#(?P<branch>.*))?$')
+
+    @cached_property
+    def cache_dir(self):
+        cache_dir = os.path.expanduser("~/.cache/lbu/dl")
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, 0755)
+        return cache_dir
+
+    def dl_file(self, source, dest_dir=None, fname=None):
+        if dest_dir is None:
+            dest_dir = self.cache_dir
+        if fname is None:
+            fname = "%s-%s" % (MD5.new(source).hexdigest()[:8], os.path.basename(source))
+            if fname.endswith('.git'):
+                fname = fname[:-4]
+        dest = os.path.join(dest_dir, fname)
+
+        git_m = self.git_url_re.match(source)
+        if git_m:
+            git_branch = git_m.group('branch')
+            if git_branch is not None:
+                source = source[:git_m.start('branch') - 1]
+                if dest.endswith('#%s' % (git_branch,)):
+                    dest = dest[:-len(git_branch) - 1]
+                dest = '%s@%s' % (dest, git_branch)
+
+            if source[:4] == 'git+':
+                source = source[4:]
+            if os.path.exists(dest):
+                cmd=['git', 'pull', '--recurse-submodules', source]
+                if git_branch: cmd+=[git_branch]
+                run_command(cmd, cwd=dest, log_output=True)
+                run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest, log_output=True)
+                return GitRepo(dest)
+            else:
+                cmd=['git', 'clone', '--recurse-submodules']
+                if git_branch: cmd+=['-b', git_branch]
+                cmd+=['--depth=1', source, dest]
+                run_command(cmd, log_output=True)
+                return GitRepo(dest)
+        raise NotImplementedError('URL download', source)
+
+
+dl = Downloader()
+
 
 class SFSFile(FSPath):
+    GIT_SOURCE_PATH='/usr/src/sfs.d/.git-source'
+    GIT_COMMIT_PATH='/usr/src/sfs.d/.git-commit'
+    UPTDCHECK_PATH='/usr/src/sfs.d/.check-up-to-date'
+    PARTS_DIR='/.parts'
+
     progress_cb=None
     chunk_size=8192
+    auto_unmount = False
 
     class SFSBasename(str):
         def strip_down(self):
@@ -267,6 +394,12 @@ class SFSFile(FSPath):
             try: ret=ret[:ret.rindex(".sfs")]
             except ValueError: pass
             return ret
+
+        def prio(self):
+            if fnmatch.fnmatch(self, "[0-9][0-9]-*"):
+                return int(self[:2])
+            else:
+                return 99
 
         def __eq__(self, other):
             if super(SFSFile.SFSBasename, self) == other: return True
@@ -307,6 +440,75 @@ class SFSFile(FSPath):
     def open(self, mode="rb"):
         return open(self.path, mode)
 
+    @cached_property
+    def mounted_path(self):
+        ldev = self.loop_dev
+        if ldev is None: return
+        mentry = global_mountinfo.find_dev(ldev)
+        if mentry is None: return
+        return mentry["mnt"]
+
+    @cached_property
+    def git_source(self):
+        try: git_source = self.open_file(self.GIT_SOURCE_PATH).read().strip()
+        except IOError: return
+        if '#' in git_source:
+            git_source, self.git_branch = git_source.rsplit('#', 1)
+        else:
+            self.git_branch = None
+        return git_source
+
+    @cached_property
+    def git_commit(self):
+        try: return self.open_file(self.GIT_COMMIT_PATH).read().strip()
+        except IOError: pass
+
+    @cached_property
+    def git_branch(self):
+        if self.git_source is None: return
+
+        # should be executed quite rarely..
+        return self.open_file(self.GIT_SOURCE_PATH).read().strip().rsplit('#', 1)[1]
+
+    @cached_property
+    def latest_stamp(self):
+        if self.git_source:
+            git_repo = dl.dl_file(self.git_source if self.git_branch is None else '%s#%s' % (
+                    self.git_source, self.git_branch))
+            if not self.git_commit == git_repo.last_commit:
+                return git_repo.last_stamp
+        try: self.open_file(self.UPTDCHECK_PATH)
+        except IOError as e:
+            return self.create_stamp
+
+        if self.mounted_path == None:
+            self.mount()
+            self.auto_unmount = True
+        try:
+            run_command(os.path.join(self.mounted_path, self.UPTDCHECK_PATH),
+                        log_output=True, env=dict(DESTDIR=self.mounted_path))
+        except CommandFailed as e:
+            return int(time.time())
+        return self.create_stamp
+
+    def open_file(self, path):
+        if self.mounted_path == None:
+            self.mount()
+            self.auto_unmount = True
+        return open(os.path.join(self.mounted_path, path.lstrip('/')), 'rb')
+
+    def mount(self, mountdir=None):
+        if mountdir is None:
+            mountdir = os.path.join(self.PARTS_DIR, "%02d-%s.%d" % (
+                self.basename.prio(), self.basename.strip_down(), self.create_stamp))
+            if not os.path.exists(mountdir):
+                os.makedirs(mountdir)
+        mount(self.path, mountdir, 'loop', 'ro')
+        self.mounted_path = mountdir
+
+    def rebuild_and_replace(self):
+        raise NotImplementedError("SFSFile.rebuild_and_replace(..)", self.path)
+
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
         dst_fobj=open(dst_temp, "wb")
@@ -325,6 +527,11 @@ class SFSFile(FSPath):
             if progress_cb: progress_cb(None)
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
+
+    def __del__(self):
+        if self.auto_unmount:
+            run_command(['umount', self.mounted_path])
+            os.rmdir(self.mounted_path)
 
 
 _mount_tab=None
@@ -427,16 +634,33 @@ def blkid2mnt(blkid):
 
 
 def _root_command_out(cmd):
-    proc=subprocess.Popen(cmd, env={"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]},
-                          stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+    return run_command(cmd)
+
+
+def run_command(cmd, cwd=None, log_output=False, env={}):
+    cmd_env = env={"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
+    for k, v in env.iteritems():
+        if v is None:
+            if k in cmd_env: del cmd_env[k]
+        else:
+            cmd_env[k] = v
+
+    if log_output:
+        info("Running: %r", cmd)
+
+    proc=subprocess.Popen(cmd, env=cmd_env,
+                          cwd=cwd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     out=[]
     while True:
         data=proc.stdout.read()
         if not data: break
+        if log_output:
+            info("Command output: %s", data.rstrip())
         out.append(data)
-    if proc.wait():
-        err=proc.stderr.read().strip()
-        raise CommandFailed(err, "".join(out).rstrip("\n"))
+    rcode = proc.wait()
+    err = proc.stderr.read().strip()
+    if rcode:
+        raise CommandFailed(err, "".join(out).rstrip("\n"), err)
     return "".join(out).rstrip("\n")
 
 

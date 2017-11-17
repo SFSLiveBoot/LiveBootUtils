@@ -25,12 +25,9 @@ def update_sfs_parse_args(argv):
 
 @cli_func(parse_argv=update_sfs_parse_args)
 def update_sfs(source_dir, no_act=False, *target_dirs):
-    """[--no-act] {--list | <source_dir>} [<target_dirs>...]"""
-    if source_dir == '--list':
-        list_mode = True
-    else:
+    """[--no-act] {--list | --auto-rebuild | <source_dir>} [<target_dirs>...]"""
+    if not source_dir[:2] == '--':
         source_dir = SFSDirectory(source_dir)
-        list_mode = False
     target_dirs=map(SFSDirectory, target_dirs)
     if not target_dirs: target_dirs=(SFSDirectoryAufs(), )
     for target_dir in target_dirs:
@@ -44,10 +41,20 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                     info("Skipping non-local symlink: %s -> %s", sfs.basename, sfs.symlink_target)
                     continue
             except OSError: pass
-            if list_mode:
+            if source_dir=='--list':
                 print sfs.path
                 continue
             dst_sfs = sfs.curlink_sfs()
+            if source_dir=='--auto-rebuild':
+                if dst_sfs.latest_stamp > dst_sfs.create_stamp:
+                    info("Rebuilding %s: %s > %s", dst_sfs.basename,
+                         stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
+                    if not no_act:
+                        dst_sfs.rebuild_and_replace()
+                else:
+                    info("Keeping %s: latest %s, current: %s", dst_sfs.basename,
+                         stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
+                continue
             src_sfs=source_dir.find_sfs(dst_sfs.basename)
             if src_sfs is None:
                 warn("Not found from update source, skipping: %s", dst_sfs.basename)
