@@ -3,7 +3,8 @@
 from logging import info, warn, error
 import logging
 import subprocess
-from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt, cli_func, SFSDirectoryAufs
+from lbu_common import SFSDirectory, get_root_sfs, CLIProgressReporter, stamp2txt, cli_func,\
+    SFSDirectoryAufs, BadArgumentsError
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -95,7 +96,7 @@ if __name__ == '__main__':
         error("Unknown command: %s", command)
         raise SystemExit(1)
     try: ret=cmd_func.cli_call(args)
-    except TypeError as e:
+    except BadArgumentsError as e:
         error("Execution error: %s", e)
         info("Usage: %s %s %s", arg0, command, cmd_func.__doc__)
         raise SystemExit(1)

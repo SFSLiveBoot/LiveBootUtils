@@ -22,6 +22,7 @@ class FilesystemError(LookupError): pass
 class NotAufs(ValueError): pass
 class NotLoopDev(ValueError): pass
 class NotSFS(ValueError): pass
+class BadArgumentsError(ValueError): pass
 
 class UTC(datetime.tzinfo):
     def utcoffset(self, dt):
@@ -80,8 +81,12 @@ def cli_func(func=None, name=None, parse_argv=None, desc=None):
     def cli_call(argv):
         try: args, kwargs=func._cli_parse_argv(argv)
         except Exception as e:
-            raise TypeError("bad arguments: %s"%e)
-        return func(*args, **kwargs)
+            raise BadArgumentsError("bad arguments: %s"%e)
+        try: return func(*args, **kwargs)
+        except TypeError as e:
+            if e.message.startswith('%s() '%(func.__name__,)):
+                raise BadArgumentsError(e)
+            else: raise
     func.cli_call=cli_call
     if not func.__doc__:
         import inspect
