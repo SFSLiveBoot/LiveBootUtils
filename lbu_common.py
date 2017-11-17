@@ -10,7 +10,7 @@ import datetime
 import pwd
 
 from Crypto.Hash import MD5
-from logging import warn, info
+from logging import warn, info, debug
 
 
 class CommandFailed(EnvironmentError): pass
@@ -361,15 +361,15 @@ class Downloader(object):
             if os.path.exists(dest):
                 cmd=['git', 'pull', '--recurse-submodules', source]
                 if git_branch: cmd+=[git_branch]
-                run_command(cmd, cwd=dest, log_output=True)
+                run_command(cmd, cwd=dest)
                 if os.path.exists(os.path.join(dest, '.gitmodules')):
-                    run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest, log_output=True)
+                    run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest)
                 return GitRepo(dest)
             else:
                 cmd=['git', 'clone', '--recurse-submodules']
                 if git_branch: cmd+=['-b', git_branch]
                 cmd+=['--depth=1', source, dest]
-                run_command(cmd, log_output=True)
+                run_command(cmd)
                 return GitRepo(dest)
         raise NotImplementedError('URL download', source)
 
@@ -470,12 +470,15 @@ class SFSFile(FSPath):
         return self.open_file(self.GIT_SOURCE_PATH).read().strip().rsplit('#', 1)[1]
 
     @cached_property
+    def git_repo(self):
+        return dl.dl_file(self.git_source if self.git_branch is None else '%s#%s' % (
+            self.git_source, self.git_branch))
+
+    @cached_property
     def latest_stamp(self):
         if self.git_source:
-            git_repo = dl.dl_file(self.git_source if self.git_branch is None else '%s#%s' % (
-                    self.git_source, self.git_branch))
-            if not self.git_commit == git_repo.last_commit:
-                return git_repo.last_stamp
+            if not self.git_commit == self.git_repo.last_commit:
+                return self.git_repo.last_stamp
         try: self.open_file(self.UPTDCHECK_PATH)
         except IOError as e:
             return self.create_stamp
@@ -485,11 +488,10 @@ class SFSFile(FSPath):
             self.auto_unmount = True
         try:
             run_command(os.path.join(self.mounted_path, self.UPTDCHECK_PATH.lstrip('/')),
-                        log_output=True, env=dict(DESTDIR=self.mounted_path))
+                        show_output=True, env=dict(DESTDIR=self.mounted_path))
         except CommandFailed as e:
-            warn("Update check failed: %s", e)
             return int(time.time())
-        return self.create_stamp
+        return self.git_repo.last_stamp if self.git_source else self.create_stamp
 
     def open_file(self, path):
         if self.mounted_path == None:
@@ -508,7 +510,7 @@ class SFSFile(FSPath):
 
     def rebuild_and_replace(self):
         run_command([os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh',), '--auto', self.path],
-                    as_user='root', log_output=True)
+                    as_user='root', show_output=True)
 
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
@@ -655,7 +657,7 @@ def _read_until_block(fobj):
     return ''.join(buf)
 
 
-def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
+def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
     if as_user is not None:
         if isinstance(as_user, int):
             as_user = pwd.getpwuid(as_user)
@@ -673,8 +675,7 @@ def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
         else:
             cmd_env[k] = v
 
-    if log_output:
-        info("Running: %r", cmd)
+    debug("Running: %r", cmd)
 
     proc=subprocess.Popen(cmd, env=cmd_env,
                           cwd=cwd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -685,16 +686,18 @@ def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
         in_f = select.select(check_f, [], [], 1)[0]
         if not in_f:
             continue
-        for buf, f, log_f, log_tag in ((stderr_buf, proc.stderr, warn, 'stderr'),
-                                       (stdout_buf, proc.stdout, info, 'stdout')):
+        for buf, f, log_tag, sys_f in ((stdout_buf, proc.stdout, 'stdout', sys.stdout),
+                                       (stderr_buf, proc.stderr, 'stderr', sys.stderr)):
             if f not in in_f: continue
             data=_read_until_block(f)
             if data=='':
                 check_f.remove(f)
                 continue
             buf.append(data)
-            if log_output:
-                log_f("%s: %r", log_tag, data.rstrip('\n'))
+            if show_output:
+                sys_f.write(data)
+                sys_f.flush()
+            debug("%s: %r", log_tag, data.rstrip('\n'))
     stderr_data = "".join(stderr_buf).rstrip('\n')
     stdout_data = "".join(stdout_buf).rstrip('\n')
     rcode = proc.wait()

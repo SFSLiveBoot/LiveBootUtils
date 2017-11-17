@@ -52,8 +52,10 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                     if not no_act:
                         dst_sfs.rebuild_and_replace()
                 else:
-                    info("Keeping %s: latest %s, current: %s", dst_sfs.basename,
-                         stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
+                    info("Keeping %s: latest %s %s current: %s", dst_sfs.basename,
+                         stamp2txt(dst_sfs.latest_stamp),
+                         "<" if dst_sfs.latest_stamp < dst_sfs.create_stamp else "=",
+                         stamp2txt(dst_sfs.create_stamp))
                 continue
             src_sfs=source_dir.find_sfs(dst_sfs.basename)
             if src_sfs is None:
@@ -72,18 +74,22 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
 
 if __name__ == '__main__':
     import sys, os
-    arg0=os.path.basename(sys.argv[0])
-    try: command=sys.argv[1]
+    args = sys.argv[:]
+    arg0=os.path.basename(args.pop(0))
+    try: command=args.pop(0)
     except IndexError:
-        warn("Usage: %s <command> [<args..>]", arg0)
+        warn("Usage: %s [--debug] <command> [<args..>]", arg0)
         info("Supported commands: %s", ", ".join(cli_func.commands.keys()))
         raise SystemExit(1)
+    if command=='--debug':
+        logging.getLogger().setLevel(logging.DEBUG)
+        command=args.pop(0)
     logging.getLogger().name=command
     try: cmd_func=cli_func.commands[command]
     except KeyError:
         error("Unknown command: %s", command)
         raise SystemExit(1)
-    try: ret=cmd_func.cli_call(sys.argv[2:])
+    try: ret=cmd_func.cli_call(args)
     except TypeError as e:
         error("Execution error: %s", e)
         info("Usage: %s %s %s", arg0, command, cmd_func.__doc__)
