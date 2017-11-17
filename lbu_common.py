@@ -509,9 +509,12 @@ class SFSFile(FSPath):
         mount(self.path, mountdir, 'loop', 'ro')
         self.mounted_path = mountdir
 
-    def rebuild_and_replace(self):
-        run_command([os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh',), '--auto', self.path],
-                    as_user='root', show_output=True)
+    def rebuild_and_replace(self, source=None):
+        cmd = [os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh', ), '--auto']
+        if source is not None:
+            cmd.append(source)
+        cmd.append(self.path)
+        run_command(cmd, as_user='root', show_output=True, env=dict(dl_cache_dir=dl.cache_dir))
 
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
@@ -752,6 +755,13 @@ def sfs_stamp(src):
         with urllib2.urlopen(src) as file_obj:
             return sfs_stamp_file(file_obj)
     else: return sfs_stamp_file(src)
+
+
+@cli_func(desc="Rebuild a SFS file, optionally from specified source")
+def rebuild_sfs(target, source=None):
+    sfs = SFSFile(target)
+    sfs.rebuild_and_replace(source)
+
 
 def _sfs_nfo_func(fname):
     try: st=os.stat(fname)
