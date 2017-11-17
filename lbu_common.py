@@ -133,8 +133,13 @@ class SFSDirectory(object):
         return str(self.backend)
 
     def __init__(self, backend):
-        if isinstance(backend, basestring) and os.path.isdir(backend):
-            backend=FSPath(backend)
+        if isinstance(backend, basestring):
+            if os.path.isdir(backend):
+                backend = FSPath(backend, walk_pattern="*.sfs")
+            elif os.path.isdir(os.path.dirname(backend)):
+                backend = FSPath(os.path.dirname(backend),
+                                 walk_pattern=os.path.basename(backend), walk_depth=0)
+
         if isinstance(backend, FSPath):
             self.backend = backend
         else:
@@ -142,7 +147,7 @@ class SFSDirectory(object):
 
     @cached_property
     def all_sfs(self):
-        return list(self.backend.walk("*.sfs", file_class=SFSFile))
+        return list(self.backend.walk(file_class=SFSFile))
 
     def find_sfs(self, name):
         for sfs in self.all_sfs:
@@ -177,6 +182,10 @@ class SFSDirectoryAufs(SFSDirectory):
 
 class FSPath(object):
     walk_hidden=False
+    walk_depth = None
+    walk_pattern = "*"
+    walk_exclude = []
+    _os_walk = staticmethod(os.walk)
 
     def __new__(cls, path, **attrs):
         if cls==FSPath and path.endswith('.sfs'):
@@ -189,6 +198,10 @@ class FSPath(object):
             raise ValueError("Invalid init path type for %s: %s"%(self.__class__.__name__, type(path).__name__))
         self.path=path
         map(lambda k: setattr(self, k, attrs[k]), attrs)
+
+    @cached_property
+    def create_stamp(self):
+        return int(os.stat(self.path).st_mtime)
 
     @cached_property
     def basename(self): return os.path.basename(self.path)
@@ -215,14 +228,51 @@ class FSPath(object):
 
     def __str__(self): return self.path
 
-    def walk(self, pattern="*", file_class=None):
+    def walk(self, pattern=None, file_class=None, exclude=None):
+        if pattern is None: pattern = self.walk_pattern
+        if isinstance(pattern, basestring):
+            pattern = pattern.split(",")
+        if exclude is None: exclude = self.walk_exclude
+        if isinstance(exclude, basestring):
+            exclude = exclude.split(",")
         if file_class is None: file_class=FSPath
-        for d, dn, fn in os.walk(self.path):
+        for d, dn, fn in self._os_walk(self.path):
+            if self.walk_depth is not None and d.count('/') - self.path.count('/') == self.walk_depth:
+                dn[:] = []
             if not self.walk_hidden:
                 dn[:]=filter(lambda x: not x.startswith("."), dn)
                 fn[:]=filter(lambda x: not x.startswith("."), fn)
-            for f in filter(lambda n: fnmatch.fnmatch(n, pattern), fn):
+            for f in filter(lambda n: any(map(lambda pat: fnmatch.fnmatch(n, pat), pattern)), fn):
+                if any(map(lambda pat: fnmatch.fnmatch(f, pat), exclude)):
+                    continue
                 yield file_class(os.path.join(d, f))
+
+    @cached_property
+    def file_info(self):
+        ret={}
+        try: st=os.stat(self.path)
+        except OSError:
+            try: st=os.lstat(self.path)
+            except OSError: pass
+            else:
+                ret["mtime"]=datetime.datetime.fromtimestamp(st.st_mtime, UTC()).isoformat()
+                ret["symlink"] = os.readlink(self.path)
+        else:
+            ret["size"] = st.st_size
+            ret["mtime"] = datetime.datetime.fromtimestamp(st.st_mtime, UTC()).isoformat()
+        try: ret["mtime"] = datetime.datetime.fromtimestamp(self.create_stamp, UTC()).isoformat()
+        except IOError: pass
+        return ret
+
+    @cached_property
+    def file_tree(self):
+        ret={}
+        orig_path=self.path.rstrip('/').split(os.path.sep)
+        for f in self.walk():
+            path_parts = f.parent_directory.path.split(os.path.sep)[len(orig_path):]
+            dir_entry = reduce(lambda a, b: a.setdefault("dirs", {}).setdefault(b, {}), path_parts, ret)
+            dir_entry.setdefault("files", {})[f.basename] = f.file_info
+        return ret
 
     @cached_property
     def file_size(self): return os.stat(self.path).st_size
@@ -794,22 +844,9 @@ def _sfs_list_rm_empty(node):
             if not node["dirs"][n]: del node["dirs"][n]
         if not node["dirs"]: del node["dirs"]
 
-@cli_func(desc="Generate list of files matching pattern in JSON format")
+@cli_func(desc="Generate matching file tree of target dir")
 def gen_sfs_list(target_dir, exclude_pat="", include_pat="*.sfs,*/vmlinuz-*,*/ramdisk*"):
-    ret={}
-    exclude_pat=exclude_pat.split(",")
-    include_pat=include_pat.split(",")
-    orig_path=target_dir.split(os.path.sep)
-    for d, dn, fn in os.walk(target_dir):
-        dn[:]=filter(lambda n: not n.startswith("."), dn)
-        path_parts=d.split(os.path.sep)[len(orig_path):]
-        fn[:]=filter(lambda f: any(map(lambda pat: fnmatch.fnmatch(os.path.join(*(path_parts+[f])), pat), include_pat)), fn)
-        fn[:]=filter(lambda f: not any(map(lambda pat: fnmatch.fnmatch(os.path.join(*(path_parts+[f])), pat), exclude_pat)), fn)
-        dir_entry=reduce(lambda a, b: a["dirs"][b], path_parts, ret)
-        dir_entry.setdefault("files", {}).update(filter(lambda x: x[1], map(lambda f: (f, _sfs_nfo_func(os.path.join(d, f))), fn)))
-        dir_entry.setdefault("dirs", {}).update(map(lambda n: (n, {}), dn))
-    _sfs_list_rm_empty(ret)
-    return ret
+    return FSPath(target_dir, walk_pattern=include_pat, walk_exclude=exclude_pat).file_tree
 
 @cli_func(desc="Retrieve sfs creation stamp from file-like object")
 def sfs_stamp_file(f):
