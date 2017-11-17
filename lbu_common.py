@@ -3,10 +3,12 @@
 import os, sys
 import struct, time, functools
 import fnmatch, glob, re
+import fcntl, errno, select
 import subprocess
 import urllib2
 import datetime
 import pwd
+
 from Crypto.Hash import MD5
 from logging import warn, info
 
@@ -482,9 +484,10 @@ class SFSFile(FSPath):
             self.mount()
             self.auto_unmount = True
         try:
-            run_command(os.path.join(self.mounted_path, self.UPTDCHECK_PATH),
+            run_command(os.path.join(self.mounted_path, self.UPTDCHECK_PATH.lstrip('/')),
                         log_output=True, env=dict(DESTDIR=self.mounted_path))
         except CommandFailed as e:
+            warn("Update check failed: %s", e)
             return int(time.time())
         return self.create_stamp
 
@@ -504,7 +507,8 @@ class SFSFile(FSPath):
         self.mounted_path = mountdir
 
     def rebuild_and_replace(self):
-        raise NotImplementedError("SFSFile.rebuild_and_replace(..)", self.path)
+        run_command([os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh',), '--auto', self.path],
+                    as_user='root', log_output=True)
 
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
@@ -634,6 +638,23 @@ def _root_command_out(cmd):
     return run_command(cmd)
 
 
+def _read_until_block(fobj):
+    old_flags=fcntl.fcntl(fobj, fcntl.F_GETFL)
+    fcntl.fcntl(fobj, fcntl.F_SETFL, old_flags|os.O_NONBLOCK)
+    buf=[]
+    while True:
+        try: d=fobj.read(1)
+        except IOError as e:
+            if e.errno == errno.EWOULDBLOCK:
+                break
+            else:
+                raise
+        if d=='': break
+        buf.append(d)
+    fcntl.fcntl(fobj, fcntl.F_SETFL, old_flags)
+    return ''.join(buf)
+
+
 def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
     if as_user is not None:
         if isinstance(as_user, int):
@@ -642,10 +663,10 @@ def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
             as_user = pwd.getpwnam(as_user)
 
         if not os.getuid() == as_user.pw_uid:
-            info("Need to change user %d -> %d", os.getuid(), as_user.pw_uid)
+            info("Switching user %d -> %d", os.getuid(), as_user.pw_uid)
             cmd = ['sudo', '-E', '-u', as_user.pw_name] + cmd
 
-    cmd_env = env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
+    cmd_env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
     for k, v in env.iteritems():
         if v is None:
             if k in cmd_env: del cmd_env[k]
@@ -657,18 +678,29 @@ def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
 
     proc=subprocess.Popen(cmd, env=cmd_env,
                           cwd=cwd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-    out=[]
-    while True:
-        data=proc.stdout.read()
-        if not data: break
-        if log_output:
-            info("Command output: %s", data.rstrip())
-        out.append(data)
+    stdout_buf=[]
+    stderr_buf=[]
+    check_f = [proc.stdout, proc.stderr]
+    while check_f:
+        in_f = select.select(check_f, [], [], 1)[0]
+        if not in_f:
+            continue
+        for buf, f, log_f, log_tag in ((stderr_buf, proc.stderr, warn, 'stderr'),
+                                       (stdout_buf, proc.stdout, info, 'stdout')):
+            if f not in in_f: continue
+            data=_read_until_block(f)
+            if data=='':
+                check_f.remove(f)
+                continue
+            buf.append(data)
+            if log_output:
+                log_f("%s: %r", log_tag, data.rstrip('\n'))
+    stderr_data = "".join(stderr_buf).rstrip('\n')
+    stdout_data = "".join(stdout_buf).rstrip('\n')
     rcode = proc.wait()
-    err = proc.stderr.read().strip()
     if rcode:
-        raise CommandFailed(err, "".join(out).rstrip("\n"), err)
-    return "".join(out).rstrip("\n")
+        raise CommandFailed(stderr_data, stdout_data, rcode)
+    return stdout_data
 
 
 @cli_func
