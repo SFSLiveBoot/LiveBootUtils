@@ -6,13 +6,9 @@ import fnmatch, glob, re
 import subprocess
 import urllib2
 import datetime
+import pwd
 from Crypto.Hash import MD5
-
 from logging import warn, info
-
-import fcntl
-
-import errno
 
 
 class CommandFailed(EnvironmentError): pass
@@ -364,7 +360,8 @@ class Downloader(object):
                 cmd=['git', 'pull', '--recurse-submodules', source]
                 if git_branch: cmd+=[git_branch]
                 run_command(cmd, cwd=dest, log_output=True)
-                run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest, log_output=True)
+                if os.path.exists(os.path.join(dest, '.gitmodules')):
+                    run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest, log_output=True)
                 return GitRepo(dest)
             else:
                 cmd=['git', 'clone', '--recurse-submodules']
@@ -502,7 +499,7 @@ class SFSFile(FSPath):
             mountdir = os.path.join(self.PARTS_DIR, "%02d-%s.%d" % (
                 self.basename.prio(), self.basename.strip_down(), self.create_stamp))
             if not os.path.exists(mountdir):
-                os.makedirs(mountdir)
+                run_command(['mkdir', '-p', mountdir], as_user='root')
         mount(self.path, mountdir, 'loop', 'ro')
         self.mounted_path = mountdir
 
@@ -530,8 +527,8 @@ class SFSFile(FSPath):
 
     def __del__(self):
         if self.auto_unmount:
-            run_command(['umount', self.mounted_path])
-            os.rmdir(self.mounted_path)
+            run_command(['umount', self.mounted_path], as_user='root')
+            run_command(['rmdir', self.mounted_path], as_user='root')
 
 
 _mount_tab=None
@@ -637,8 +634,18 @@ def _root_command_out(cmd):
     return run_command(cmd)
 
 
-def run_command(cmd, cwd=None, log_output=False, env={}):
-    cmd_env = env={"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
+def run_command(cmd, cwd=None, log_output=False, env={}, as_user=None):
+    if as_user is not None:
+        if isinstance(as_user, int):
+            as_user = pwd.getpwuid(as_user)
+        elif isinstance(as_user, basestring):
+            as_user = pwd.getpwnam(as_user)
+
+        if not os.getuid() == as_user.pw_uid:
+            info("Need to change user %d -> %d", os.getuid(), as_user.pw_uid)
+            cmd = ['sudo', '-E', '-u', as_user.pw_name] + cmd
+
+    cmd_env = env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
     for k, v in env.iteritems():
         if v is None:
             if k in cmd_env: del cmd_env[k]
@@ -675,7 +682,7 @@ def mount(src, dst, *opts, **kwargs):
         cmd.append("--bind")
     if opts or kwargs:
         cmd.extend(["-o", ",".join(list(opts) + map(lambda k: "%s=%s"%(k, kwargs[k]), kwargs))])
-    _root_command_out(cmd)
+    run_command(cmd, as_user='root')
 
 
 @cli_func(parse_argv=lambda argv: ((argv[0],), {"pos": int(argv[1])} if len(argv)>1 else {}))
