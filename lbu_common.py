@@ -178,6 +178,11 @@ class SFSDirectoryAufs(SFSDirectory):
 class FSPath(object):
     walk_hidden=False
 
+    def __new__(cls, path, **attrs):
+        if cls==FSPath and path.endswith('.sfs'):
+            cls=SFSFile
+        return super(FSPath, cls).__new__(cls, path, **attrs)
+
     def __init__(self, path, **attrs):
         if isinstance(path, FSPath): path=path.path
         if not isinstance(path, basestring):
