@@ -65,11 +65,12 @@ def repr_wrap(fn):
     return repr_gen
 
 
-def cli_func(func=None, name=None, parse_argv=None):
+def cli_func(func=None, name=None, parse_argv=None, desc=None):
     if func is None:
         def gen(func_real):
             if name is not None: func_real._cli_name=name
             if parse_argv is not None: func_real._cli_parse_argv=parse_argv
+            if desc is not None: func_real._cli_desc = desc
             return cli_func(func_real)
         return gen
     cli_func.commands[getattr(func, "_cli_name", func.__name__.replace("_", "-"))]=func
@@ -94,7 +95,7 @@ def cli_func(func=None, name=None, parse_argv=None):
 cli_func.commands={}
 
 
-@cli_func(name="help")
+@cli_func(name="help", desc="Show usage help for other commands")
 def cli_func_help(command):
     return " ".join(map(str, ("Usage:", command, cli_func.commands[command].__doc__)))
 
@@ -588,7 +589,7 @@ class MountPoint(FSPath):
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
 
-@cli_func
+@cli_func(desc="List AUFS original components")
 def aufs_components(directory='/'):
     fn_ts_re = re.compile(r'^(.+)\.([0-9]+)$')
     ret = []
@@ -608,7 +609,7 @@ def aufs_components(directory='/'):
     return ret
 
 
-@cli_func
+@cli_func(desc="Find out the primary SFS file")
 def get_root_sfs():
     test_file=FSPath("/bin/true")
     root_backend=SFSFile(test_file.backend)
@@ -665,7 +666,7 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
             as_user = pwd.getpwnam(as_user)
 
         if not os.getuid() == as_user.pw_uid:
-            info("Switching user %d -> %d", os.getuid(), as_user.pw_uid)
+            info("Change user %d->%d for %r", os.getuid(), as_user.pw_uid, cmd)
             cmd = ['sudo', '-E', '-u', as_user.pw_name] + cmd
 
     cmd_env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
@@ -702,11 +703,11 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
     stdout_data = "".join(stdout_buf).rstrip('\n')
     rcode = proc.wait()
     if rcode:
-        raise CommandFailed(stderr_data, stdout_data, rcode)
+        raise CommandFailed(cmd, rcode, stderr_data, stdout_data)
     return stdout_data
 
 
-@cli_func
+@cli_func(desc="Show single blkid(8) tag value for specified device")
 def blkid_value(blk_dev, name):
     return _root_command_out(["blkid", "-o", "value", "-s", name, blk_dev])
 
@@ -720,14 +721,15 @@ def mount(src, dst, *opts, **kwargs):
     run_command(cmd, as_user='root')
 
 
-@cli_func(parse_argv=lambda argv: ((argv[0],), {"pos": int(argv[1])} if len(argv)>1 else {}))
+@cli_func(parse_argv=lambda argv: ((argv[0],), {"pos": int(argv[1])} if len(argv)>1 else {}),
+          desc="Find device (or other field position in mtab) for a mountpoint")
 def mnt2dev(mnt, pos=0):
     esc_name=os.path.realpath(mnt).replace(" ", "\\040")
     with open("/proc/mounts") as proc_mounts:
         return filter(lambda l: l[1]==esc_name, map(lambda line: line.strip().split(), proc_mounts))[-1][pos]
 
 
-@cli_func
+@cli_func(desc="Find disk name holding specified partition")
 def part2disk(dev):
     dev=dev.split("/")[-1]
     for d in glob.glob("/sys/block/*"):
@@ -736,7 +738,7 @@ def part2disk(dev):
     raise FilesystemError("No partition for device %r"%(dev,))
 
 
-@cli_func
+@cli_func(desc="Find a block device based on blkid(8) tag")
 def blkid_find(**tags):
     cmd=reduce(lambda a, b: a + ["-t", "%s=%s"%b], tags.items(), ["blkid", "-o", "device"])
     return _root_command_out(cmd).split("\n")
@@ -744,7 +746,7 @@ def blkid_find(**tags):
 _url_re=re.compile(r'^(?P<schema>https?|ftp)://.*')
 
 
-@cli_func
+@cli_func(desc="Show file or URL-based SFS file create stamp")
 def sfs_stamp(src):
     if _url_re.match(src):
         with urllib2.urlopen(src) as file_obj:
@@ -772,7 +774,7 @@ def _sfs_list_rm_empty(node):
             if not node["dirs"][n]: del node["dirs"][n]
         if not node["dirs"]: del node["dirs"]
 
-@cli_func
+@cli_func(desc="Generate list of files matching pattern in JSON format")
 def gen_sfs_list(target_dir, exclude_pat="", include_pat="*.sfs,*/vmlinuz-*,*/ramdisk*"):
     ret={}
     exclude_pat=exclude_pat.split(",")
@@ -789,7 +791,7 @@ def gen_sfs_list(target_dir, exclude_pat="", include_pat="*.sfs,*/vmlinuz-*,*/ra
     _sfs_list_rm_empty(ret)
     return ret
 
-@cli_func
+@cli_func(desc="Retrieve sfs creation stamp from file-like object")
 def sfs_stamp_file(f):
     close=False
     if isinstance(f, basestring):

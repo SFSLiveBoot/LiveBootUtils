@@ -23,7 +23,8 @@ def update_sfs_parse_args(argv):
         return [argv[0], False] + argv[1:], {}
 
 
-@cli_func(parse_argv=update_sfs_parse_args)
+@cli_func(parse_argv=update_sfs_parse_args,
+          desc="Update (or list only) a SFS collection (by defaults components of '/')")
 def update_sfs(source_dir, no_act=False, *target_dirs):
     """[--no-act] {--list | --auto-rebuild | <source_dir>} [<target_dirs>...]"""
     if not source_dir[:2] == '--':
@@ -46,6 +47,8 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                 continue
             dst_sfs = sfs.curlink_sfs()
             if source_dir=='--auto-rebuild':
+                if dst_sfs.git_source:
+                    info("Git repo for %s: %s", dst_sfs.basename, dst_sfs.git_source)
                 if dst_sfs.latest_stamp > dst_sfs.create_stamp:
                     info("Rebuilding %s: %s > %s", dst_sfs.basename,
                          stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
@@ -79,7 +82,9 @@ if __name__ == '__main__':
     try: command=args.pop(0)
     except IndexError:
         warn("Usage: %s [--debug] <command> [<args..>]", arg0)
-        info("Supported commands: %s", ", ".join(cli_func.commands.keys()))
+        info("Supported commands:%s",
+             "".join(map(lambda (n, f): "\n\t%s\t%s"%(n, getattr(f, "_cli_desc", "")),
+                         sorted(cli_func.commands.iteritems()))))
         raise SystemExit(1)
     if command=='--debug':
         logging.getLogger().setLevel(logging.DEBUG)
