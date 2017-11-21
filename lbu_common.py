@@ -200,6 +200,10 @@ class FSPath(object):
         self.path=path
         map(lambda k: setattr(self, k, attrs[k]), attrs)
 
+    @property
+    def exists(self):
+        return os.path.exists(self.path)
+
     @cached_property
     def create_stamp(self):
         return int(os.stat(self.path).st_mtime)
@@ -570,12 +574,15 @@ class SFSFile(FSPath):
         mount(self.path, mountdir, 'loop', 'ro')
         self.mounted_path = mountdir
 
-    def rebuild_and_replace(self, source=None):
+    def rebuild_and_replace(self, source=None, env=None):
         cmd = [os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh', ), '--auto']
         if source is not None:
             cmd.append(source)
         cmd.append(self.path)
-        run_command(cmd, as_user='root', show_output=True, env=dict(dl_cache_dir=dl.cache_dir))
+        r_env=dict(dl_cache_dir=dl.cache_dir)
+        if env is not None:
+            r_env.update(**env)
+        run_command(cmd, as_user='root', show_output=True, env=r_env)
 
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
@@ -595,6 +602,10 @@ class SFSFile(FSPath):
             if progress_cb: progress_cb(None)
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
+
+    @cached_property
+    def needs_update(self):
+        return self.latest_stamp > self.create_stamp
 
     def __del__(self):
         if self.auto_unmount:
@@ -918,3 +929,31 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
             else:
                 warn("Keeping newer %s: %s < %s",
                      dst_sfs.basename, stamp2txt(src_sfs.create_stamp), stamp2txt(dst_sfs.create_stamp))
+
+
+@cli_func(desc="Build SFS directory from sources")
+def build_sfs_dir(dest_dir, source_list, source_url=None):
+    run_env = {}
+    for line in open(source_list):
+        words = line.strip().split()
+        if '=' in words[0]:
+            env_k, env_v = line.strip().split('=', 1)
+            run_env[env_k] = env_v
+            continue
+        if len(words) > 1:
+            sfs_name, sfs_source_url = words
+        else:
+            sfs_name = words[0]
+            if source_url is None:
+                raise ValueError("No source URL defined", sfs_name)
+            sfs_source_url = os.path.join(source_url, sfs_name)
+        if sfs_name == '*':
+            source_url = sfs_source_url
+            continue
+        dest_sfs = SFSFile(path=os.path.join(dest_dir, sfs_name.lstrip('/')))
+        if not os.path.exists(dest_sfs.parent_directory.path):
+            os.makedirs(dest_sfs.parent_directory.path, 0755)
+        if dest_sfs.exists and not dest_sfs.needs_update:
+            info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
+            continue
+        dest_sfs.rebuild_and_replace(sfs_source_url, env=run_env)
