@@ -394,8 +394,27 @@ class GitRepo(FSPath):
         return int(run_command(['git', 'log', '-1', '--format=%ct'], cwd=self.path))
 
 
+def parse_time(s, fmt, tz="GMT"):
+    parsed_time = time.strptime(s, fmt)
+    old_tz = os.environ.get("TZ")
+    os.environ["TZ"] = tz
+    time.tzset()
+    stamp = time.mktime(parsed_time)
+    if old_tz is None:
+        del os.environ["TZ"]
+    else:
+        os.environ["TZ"] = old_tz
+    time.tzset()
+    return stamp
+
+
 class Downloader(object):
     git_url_re = re.compile(r'(^git://.*?|^git\+.*?|.*?\.git)(?:#(?P<branch>.*))?$')
+    http_url_re = re.compile(r'^https?://.*')
+
+    http_recv_tmout = 10
+    http_read_size = 8192
+    http_time_format = "%a, %d %b %Y %H:%M:%S GMT"
 
     @cached_property
     def cache_dir(self):
@@ -404,7 +423,70 @@ class Downloader(object):
             os.makedirs(cache_dir, 0755)
         return cache_dir
 
-    def dl_file(self, source, dest_dir=None, fname=None):
+    def dl_file_git(self, source, dest_path):
+        git_m = self.git_url_re.match(source)
+        git_branch = git_m.group('branch')
+        if git_branch is not None:
+            source = source[:git_m.start('branch') - 1]
+            if dest_path.endswith('#%s' % (git_branch,)):
+                dest_path = dest_path[:-len(git_branch) - 1]
+            dest_path = '%s@%s' % (dest_path, git_branch)
+
+        if source[:4] == 'git+':
+            source = source[4:]
+        if os.path.exists(dest_path):
+            cmd = ['git', 'pull', '--recurse-submodules', source]
+            if git_branch: cmd += [git_branch]
+            run_command(cmd, cwd=dest_path)
+            if os.path.exists(os.path.join(dest_path, '.gitmodules')):
+                run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest_path)
+            return GitRepo(dest_path)
+        else:
+            cmd = ['git', 'clone', '--recurse-submodules']
+            if git_branch: cmd += ['-b', git_branch]
+            cmd += ['--depth=1', source, dest_path]
+            run_command(cmd)
+            return GitRepo(dest_path)
+
+    def dl_file_url(self, source, dest_path):
+        opener = urllib2.build_opener()
+        if os.path.exists(dest_path):
+            dest_st = os.stat(dest_path)
+            if dest_st.st_size > 0:
+                opener.addheaders.append(("If-Modified-Since",
+                                          time.strftime(self.http_time_format, time.gmtime(dest_st.st_mtime))))
+        try:
+            url_f = opener.open(source)
+        except urllib2.HTTPError as e:
+            if e.code == 304:
+                return FSPath(dest_path)
+            raise
+
+        dest_path_tmp = "%s.%d.dltemp" % (dest_path, os.getpid())
+        dest_f = open(dest_path_tmp, "wb")
+        while True:
+            try:
+                url_f.fileno()
+            except AttributeError:
+                pass
+            else:
+                r_in = select.select([url_f], [], [], self.http_recv_tmout)[0]
+                if not r_in:
+                    info("No data in %s seconds, stalled?", self.http_recv_tmout)
+                    continue
+            d = url_f.read(self.http_read_size)
+            if d == '':
+                break
+            dest_f.write(d)
+        dest_f.close()
+        lm_hdr = url_f.headers["Last-Modified"]
+        if lm_hdr:
+            mtime = parse_time(lm_hdr, self.http_time_format, "GMT")
+            os.utime(dest_path_tmp, (time.time(), mtime))
+        os.rename(dest_path_tmp, dest_path)
+        return FSPath(dest_path)
+
+    def dl_file(self, source, fname=None, dest_dir=None):
         if dest_dir is None:
             dest_dir = self.cache_dir
         if fname is None:
@@ -413,31 +495,9 @@ class Downloader(object):
                 fname = fname[:-4]
         dest = os.path.join(dest_dir, fname)
 
-        git_m = self.git_url_re.match(source)
-        if git_m:
-            git_branch = git_m.group('branch')
-            if git_branch is not None:
-                source = source[:git_m.start('branch') - 1]
-                if dest.endswith('#%s' % (git_branch,)):
-                    dest = dest[:-len(git_branch) - 1]
-                dest = '%s@%s' % (dest, git_branch)
-
-            if source[:4] == 'git+':
-                source = source[4:]
-            if os.path.exists(dest):
-                cmd=['git', 'pull', '--recurse-submodules', source]
-                if git_branch: cmd+=[git_branch]
-                run_command(cmd, cwd=dest)
-                if os.path.exists(os.path.join(dest, '.gitmodules')):
-                    run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest)
-                return GitRepo(dest)
-            else:
-                cmd=['git', 'clone', '--recurse-submodules']
-                if git_branch: cmd+=['-b', git_branch]
-                cmd+=['--depth=1', source, dest]
-                run_command(cmd)
-                return GitRepo(dest)
-        raise NotImplementedError('URL download', source)
+        if self.git_url_re.match(source):
+            return self.dl_file_git(source, dest)
+        return self.dl_file_url(source, dest)
 
 
 dl = Downloader()
@@ -957,3 +1017,8 @@ def build_sfs_dir(dest_dir, source_list, source_url=None):
             info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
             continue
         dest_sfs.rebuild_and_replace(sfs_source_url, env=run_env)
+
+
+@cli_func(desc="Download file to cache and return filename")
+def dl_file(source, fname=None, cache_dir=None):
+    print dl.dl_file(source, fname, cache_dir)
