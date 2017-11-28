@@ -133,6 +133,100 @@ class CLIProgressReporter(object):
 
 pr_cls = CLIProgressReporter
 
+
+class LXC(object):
+    auto_remove = False
+    init_cmd = []
+
+    class BindEntry(object):
+        def __init__(self, src, dst, ro=False):
+            if isinstance(src, FSPath):
+                src = src.path
+            if isinstance(dst, FSPath):
+                dst = dst.path
+            self.src = src
+            self.dst = dst.lstrip("/")
+            self.ro = ro
+
+        def __str__(self):
+            return "%s=%s"%(self.src, self.dst)
+
+        @repr_wrap(as_str=True)
+        def __repr__(self):
+            return "%r -> %r%s"%(self.src, self.dst, " [RO]" if self.ro else "")
+
+    def __init__(self, name=None, **attrs):
+        if name is None:
+            name = "lxc-%d-%s" % (os.getpid(), time.time())
+        self.name = name
+        for k in attrs:
+            setattr(self, k, attrs[k])
+
+    def __del__(self):
+        if self.auto_remove:
+            if self.is_running:
+                self.shutdown()
+                while True:
+                    time.sleep(0.1)
+                    if not self.is_running:
+                        break
+            run_command(["lxc-destroy", "-n", self.name], as_user="root")
+
+    @repr_wrap
+    def __repr__(self):
+        return self.name
+
+    def get_status(self):
+        status = run_command(["lxc-info", "-n", self.name], as_user="root")
+        ret = {}
+        last_link=None
+        for line in status.strip().split("\n"):
+            k, v = line.split(":", 1)
+            v=v.strip()
+            if k=="Link":
+                last_link=dict(name=v)
+                ret.setdefault("Link", []).append(last_link)
+            elif k.startswith(" "):
+                last_link[k[1:]]=v
+            else:
+                last_link=None
+                ret[k]=v
+        return ret
+
+    @property
+    def is_running(self):
+        try: return self.get_status()["State"] == "RUNNING"
+        except CommandFailed: return False
+
+    @classmethod
+    def from_sfs(cls, name, sfs_parts, extra_parts=[], bind_dirs=[], **attrs):
+        cmd = ["lxc-create", "-t", "sfs", "-n", name, "--",
+               "--default-parts", " ".join(sfs_parts), "--host-network"]
+        cmd.extend(reduce(lambda a, b: a + ["--bind-ro" if b.ro else "--bind", str(b)], bind_dirs, []))
+        cmd.extend(extra_parts)
+        run_command(cmd, as_user="root")
+        if "auto_remove" not in attrs:
+            attrs["auto_remove"] = True
+        return cls(name, **attrs)
+
+    def start(self, init=None):
+        cmd = ["lxc-start", "-n", self.name, "-d", "-l", "info"]
+        if init is None:
+            init = self.init_cmd
+        if init:
+            cmd.append("--")
+            cmd.extend(init)
+        return run_command(cmd, as_user="root")
+
+    def run(self, cmd, **args):
+        if not self.is_running:
+            self.start()
+        return run_command(["lxc-attach", "-e", "-n", self.name, "--"] + cmd, as_user="root", **args)
+
+    def shutdown(self):
+        run_command(["lxc-stop", "-k", "-n", self.name], as_user="root")
+
+
 class SFSDirectory(object):
     @repr_wrap
     def __repr__(self):
