@@ -286,6 +286,7 @@ class FSPath(object):
     walk_pattern = "*"
     walk_exclude = []
     _os_walk = staticmethod(os.walk)
+    _remove_on_del = False
 
     def __new__(cls, path, **attrs):
         if cls==FSPath and path.endswith('.sfs'):
@@ -297,7 +298,13 @@ class FSPath(object):
         if not isinstance(path, basestring):
             raise ValueError("Invalid init path type for %s: %s"%(self.__class__.__name__, type(path).__name__))
         self.path=path
+        auto_remove = attrs.pop("auto_remove", False)
+        if auto_remove:
+            self._remove_on_del = auto_remove
         map(lambda k: setattr(self, k, attrs[k]), attrs)
+
+    def join(self, *paths):
+        return self.__class__(os.path.join(self.path, *map(lambda p: p.lstrip("/"), paths)))
 
     @property
     def exists(self):
@@ -327,6 +334,8 @@ class FSPath(object):
     def __eq__(self, other):
         if isinstance(other, FSPath):
             return self.path == other.path
+        elif isinstance(other, basestring):
+            return self.path == other
         else:
             return super(FSPath, self) == other
 
@@ -399,6 +408,11 @@ class FSPath(object):
         if not parent_path: parent_path=os.path.sep
         return parent_path
 
+    def open_file(self, path, mode="rb"):
+        if not self.exists and mode[:1] in "wa":
+            os.makedirs(self.path, 0755)
+        return open(os.path.join(self.path, path.lstrip("/")), mode)
+
     @property
     def symlink_target(self): return os.readlink(self.path)
 
@@ -439,6 +453,18 @@ class FSPath(object):
             if not int(open('/sys/block/%s/loop/offset'%(devname,)).read().strip())==0:
                 continue
             return '/dev/%s'%(devname,)
+
+    def __del__(self):
+        if self._remove_on_del and self.exists:
+            if os.path.islink(self.path):
+                os.unlink(self.path)
+            elif os.path.isdir(self.path):
+                try: os.rmdir(self.path)
+                except OSError as e:
+                    if not e.errno==errno.ENOTEMPTY:
+                        raise
+            else:
+                raise ValueError("Refuse auto-remove files", self)
 
 
 class MountInfo(object):
@@ -781,11 +807,45 @@ def _load_mount_tab():
 
 
 class MountPoint(FSPath):
+    def __del__(self):
+        if self._remove_on_del:
+            self.umount()
+        super(MountPoint, self).__del__()
+
     @cached_property
     def fs_type(self): return self._find_mount_tab_entry().fs_type
 
     @cached_property
     def mount_source(self): return self._find_mount_tab_entry().mount_source
+
+    def umount(self):
+        if not self.exists or not self.is_mounted:
+            return
+        run_command(["umount", "-l", self.path], as_user="root")
+
+    def mount(self, src, *opts, **kwargs):
+        if not os.path.exists(self.path):
+            os.makedirs(self.path, 0755)
+        cmd=["mount", src, self.path]
+        if kwargs.pop("bind", False):
+            cmd.append("--bind")
+        fs_type = kwargs.pop("fs_type", False)
+        if fs_type:
+            cmd.extend(["-t", fs_type])
+        auto_remove = kwargs.pop("auto_remove", False)
+        if auto_remove:
+            self._remove_on_del = True
+        if opts or kwargs:
+            cmd.extend(["-o", ",".join(list(opts) + map(lambda k: "%s=%s"%(k, kwargs[k]), kwargs))])
+        run_command(cmd, as_user='root')
+
+    @property
+    def is_mounted(self):
+        if not self.exists: return False
+        for e in global_mountinfo:
+            if os.path.samefile(e["mnt"], self.path):
+                return True
+        return False
 
     def _find_mount_tab_entry(self):
         if _mount_tab is None: _load_mount_tab()
