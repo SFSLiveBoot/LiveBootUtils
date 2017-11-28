@@ -778,9 +778,7 @@ dl = Downloader()
 
 
 class SFSFile(FSPath):
-    GIT_SOURCE_PATH='/usr/src/sfs.d/.git-source'
-    GIT_COMMIT_PATH='/usr/src/sfs.d/.git-commit'
-    UPTDCHECK_PATH='/usr/src/sfs.d/.check-up-to-date'
+    UPTDCHECK_PATH = os.path.join(SFSBuilder.SFS_SRC_D, '.check-up-to-date')
     PARTS_DIR='/.parts'
 
     progress_cb=None
@@ -845,11 +843,11 @@ class SFSFile(FSPath):
         if ldev is None: return
         mentry = global_mountinfo.find_dev(ldev)
         if mentry is None: return
-        return mentry["mnt"]
+        return MountPoint(mentry["mnt"])
 
     @cached_property
     def git_source(self):
-        try: git_source = self.open_file(self.GIT_SOURCE_PATH).read().strip()
+        try: git_source = self.open_file(SFSBuilder.GIT_SOURCE_PATH).read().strip()
         except IOError: return
         if '#' in git_source:
             git_source, self.git_branch = git_source.rsplit('#', 1)
@@ -859,7 +857,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def git_commit(self):
-        try: return self.open_file(self.GIT_COMMIT_PATH).read().strip()
+        try: return self.open_file(SFSBuilder.GIT_COMMIT_PATH).read().strip()
         except IOError: pass
 
     @cached_property
@@ -885,10 +883,9 @@ class SFSFile(FSPath):
 
         if self.mounted_path == None:
             self.mount()
-            self.auto_unmount = True
         try:
-            run_command(os.path.join(self.mounted_path, self.UPTDCHECK_PATH.lstrip('/')),
-                        show_output=True, env=dict(DESTDIR=self.mounted_path))
+            run_command(self.mounted_path.join(self.UPTDCHECK_PATH),
+                        show_output=True, env=dict(DESTDIR=self.mounted_path.path))
         except CommandFailed as e:
             return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
@@ -896,8 +893,7 @@ class SFSFile(FSPath):
     def open_file(self, path):
         if self.mounted_path == None:
             self.mount()
-            self.auto_unmount = True
-        return open(os.path.join(self.mounted_path, path.lstrip('/')), 'rb')
+        return self.mounted_path.open_file(path)
 
     def mount(self, mountdir=None):
         if mountdir is None:
@@ -905,18 +901,18 @@ class SFSFile(FSPath):
                 self.basename.prio(), self.basename.strip_down(), self.create_stamp))
             if not os.path.exists(mountdir):
                 run_command(['mkdir', '-p', mountdir], as_user='root')
-        mount(self.path, mountdir, 'loop', 'ro')
-        self.mounted_path = mountdir
+        mnt = MountPoint(mountdir)
+        if not mnt.is_mounted:
+            mnt.mount(self.path, "loop", "ro", auto_remove=True)
+        self.mounted_path = mnt
 
     def rebuild_and_replace(self, source=None, env=None):
-        cmd = [os.path.join(os.path.dirname(__file__), 'scripts/rebuild-sfs.sh', ), '--auto']
-        if source is not None:
-            cmd.append(source)
-        cmd.append(self.path)
-        r_env=dict(dl_cache_dir=dl.cache_dir)
+        if isinstance(source, basestring):
+            source = dl.dl_file(source)
+        builder = SFSBuilder(self, source)
         if env is not None:
-            r_env.update(**env)
-        run_command(cmd, as_user='root', show_output=True, env=r_env)
+            builder.run_env.update(**env)
+        builder.build()
 
     def replace_with(self, other, progress_cb=None):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
@@ -940,11 +936,6 @@ class SFSFile(FSPath):
     @cached_property
     def needs_update(self):
         return self.latest_stamp > self.create_stamp
-
-    def __del__(self):
-        if self.auto_unmount:
-            run_command(['umount', self.mounted_path], as_user='root')
-            run_command(['rmdir', self.mounted_path], as_user='root')
 
 
 _mount_tab=None
