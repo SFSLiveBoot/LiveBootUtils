@@ -227,6 +227,150 @@ class LXC(object):
         run_command(["lxc-stop", "-k", "-n", self.name], as_user="root")
 
 
+class SFSBuilder(object):
+    SFS_SRC_D = '/usr/src/sfs.d'
+    GIT_SOURCE_PATH = os.path.join(SFS_SRC_D, '.git-source')
+    GIT_COMMIT_PATH = os.path.join(SFS_SRC_D, '.git-commit')
+    SQFS_EXCLUDE = os.path.join(SFS_SRC_D, ".sqfs-exclude")
+
+    LXC_PARTS_FILE = os.path.join(SFS_SRC_D, ".lxc-build-parts")
+    LXC_DESTDIR = "/destdir"
+    LXC_CACHE_DIR = "/var/cache/lbu"
+    LXC_DL_CACHE = os.path.join(LXC_CACHE_DIR, "dl")
+    LXC_LBU = "/opt/LiveBootUtils"
+    LXC_INIT_CMD = ["sleep", os.environ.get("LXC_INIT_SLEEP", "7200")]
+
+    dest_dir_parent = os.path.expanduser("~/.cache/lbu/rebuild")
+    default_lxc_parts = ["00-*", "scripts", "settings"]
+
+    def __init__(self, target_sfs, source=None):
+        if not isinstance(target_sfs, SFSFile):
+            target_sfs = SFSFile(target_sfs)
+        self.target = target_sfs
+        if source is None and target_sfs.exists:
+            source = target_sfs.git_source
+        self.source = source
+
+    @cached_property
+    def name(self):
+        return "rebuild-%s.%d" % (self.target.basename.strip_down(), os.getpid())
+
+    @cached_property
+    def dest_base(self):
+        dest_base = FSPath(os.path.join(self.dest_dir_parent, self.name), auto_remove=True)
+        if not dest_base.exists:
+            os.makedirs(dest_base.path, 0755)
+        return dest_base
+
+    @cached_property
+    def dest_dir(self):
+        dest_dir = MountPoint(self.dest_base.join("destdir"), auto_remove=True)
+        if dest_dir.is_mounted: return dest_dir
+        dest_dir.mount("destdir", fs_type="tmpfs", mode="0755")
+        if self.source is not None:
+            if not isinstance(self.source, GitRepo):
+                raise ValueError("Source is not GitRepo")
+            git_tar_out = ("cd \"$SRC\";git archive HEAD | tar x -C \"$DESTDIR\";"
+                           "P=\"$PWD\" git submodule --quiet foreach "
+                           "'git archive --prefix=\"${PWD#$P/}/\" HEAD | tar x -C \"$DESTDIR\"'")
+            run_command(["sh", "-c", git_tar_out],
+                        env=dict(DESTDIR=dest_dir.path, SRC=self.source.path), as_user="root")
+        return dest_dir
+
+    @cached_property
+    def lbu_d(self):
+        return FSPath(__file__).parent_directory
+
+    @cached_property
+    def lxc_setup_d(self):
+        d = MountPoint(self.dest_base.join("lxc-setup"), auto_remove=True)
+        if d.is_mounted: return d
+        d.mount("lxc-setup", fs_type="tmpfs", mode="0755")
+        paths = [self.LXC_LBU, self.LXC_DL_CACHE, self.LXC_DESTDIR]
+        paths.extend(map(lambda (h, l): l.lstrip("/"), self.deb_mappings))
+        run_command(["mkdir", "-p"] + map(lambda sd: d.join(sd).path, paths), as_user="root")
+        return d
+
+    @cached_property
+    def lxc_rw_d(self):
+        d = MountPoint(self.dest_base.join("lxc-rw"), auto_remove=True)
+        if d.is_mounted: return d
+        d.mount("lxc-rw", fs_type="tmpfs", mode="0755")
+        return d
+
+    @cached_property
+    def sfs_src_d(self):
+        return self.dest_dir.join(self.SFS_SRC_D)
+
+    @cached_property
+    def lxc_parts(self):
+        ret = None
+        try: ret = self.dest_dir.open_file(self.LXC_PARTS_FILE).read().strip().split()
+        except IOError as e:
+            if not e.errno == errno.ENOENT:
+                raise
+        if not ret:
+            return self.default_lxc_parts[:]
+        return ret
+
+    @cached_property
+    def deb_mappings(self):
+        ret = [(os.path.join(dl.cache_dir, "apt"), "var/cache/apt/archives"),
+               (os.path.join(dl.cache_dir, "lists"), "var/lib/apt/lists")]
+        for p in ret:
+            if not os.path.exists(p[0]):
+                os.makedirs(p[0], 0755)
+        return ret
+
+    @cached_property
+    def lxc(self):
+        lxc = LXC.from_sfs(self.name, self.lxc_parts,
+                           map(lambda d: d.path, [self.lxc_setup_d, self.lxc_rw_d]),
+                           [
+                               LXC.BindEntry(self.dest_dir, self.LXC_DESTDIR),
+                               LXC.BindEntry(dl.cache_dir, self.LXC_DL_CACHE),
+                               LXC.BindEntry(self.lbu_d, self.LXC_LBU, True),
+                           ] + map(lambda (h, l): LXC.BindEntry(h, l), self.deb_mappings),
+                           init_cmd = self.LXC_INIT_CMD)
+        return lxc
+
+    @cached_property
+    def run_env(self):
+        return dict(
+            TERM=os.environ.get("TERM", "linux"),
+            COLUMNS=os.environ.get("COLUMNS", "80"), LINES=os.environ.get("LINES", "25"),
+            DESTDIR=self.LXC_DESTDIR,
+            lbu=self.LXC_LBU,
+            dl_cache_dir=self.LXC_DL_CACHE,
+            SILENT_EXIT="1",
+            HOME="/root",
+            LANG="C.UTF-8")
+
+    def run_in_dest(self, cmd, **args):
+        if not "env" in args:
+            args["env"] = self.run_env
+        return self.lxc.run(cmd, **args)
+
+    def build(self):
+        apt_updated = False
+        for script in sorted(self.sfs_src_d.walk(pattern="[0-9][0-9]-*"), key=lambda p: p.basename):
+            if not apt_updated:
+                self.run_in_dest(["apt-get", "update"], show_output=True)
+                apt_updated = True
+            info("Running %s", script.basename)
+            cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
+            self.run_in_dest(cmd, show_output=True)
+        if self.source.join(".git-facls").exists:
+            self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
+        dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
+        cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
+        sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
+        if sqfs_excl.exists:
+            cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
+        run_command(cmd, show_output=True)
+        self.target.replace_file(dst_temp)
+
+
 class SFSDirectory(object):
     @repr_wrap
     def __repr__(self):
