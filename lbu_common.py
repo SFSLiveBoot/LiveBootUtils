@@ -58,10 +58,15 @@ def clear_cached_properties(obj):
         delattr(obj, prop.fget.__name__)
 
 
-def repr_wrap(fn):
+def repr_wrap(fn=None, as_str=False):
+    if fn is None:
+        def repr_wrap_gen(fn):
+            return repr_wrap(fn, as_str)
+        return repr_wrap_gen
+    repr_fmt = "<%s.%s %s @%x>" if as_str else "<%s.%s %r @%x>"
     @functools.wraps(fn)
     def repr_gen(self):
-        return "<%s.%s %r @%x>"%(self.__class__.__module__, self.__class__.__name__, fn(self), id(self))
+        return repr_fmt%(self.__class__.__module__, self.__class__.__name__, fn(self), id(self))
     repr_gen._repr=fn
     return repr_gen
 
