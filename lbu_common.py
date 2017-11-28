@@ -418,24 +418,29 @@ class FSPath(object):
 
     def replace_file(self, temp_filename, change_stamp=None, backup_name=None):
         is_link=os.path.islink(self.path)
-        old_stat=os.stat(self.path)
-        if is_link and change_stamp is None:
-            change_stamp=os.stat(temp_filename).st_mtime
+        try: old_stat=os.stat(self.path)
+        except OSError: old_stat = None
         if backup_name is None: backup_name="%s.OLD.%s"%(self.path, int(time.time()))
-        os.rename(self.path, backup_name)
-        if is_link:
-            new_name="%s.%s"%(self.path, int(change_stamp))
-            os.rename(temp_filename, new_name)
+        if is_link or self.exists:
+            os.rename(self.path, backup_name)
+        if change_stamp is None:
+            change_stamp=os.stat(temp_filename).st_mtime
+        new_name="%s.%s"%(self.path, int(change_stamp))
+        os.rename(temp_filename, new_name)
+        try:
             os.symlink(os.path.basename(new_name), self.path)
-        else:
-            os.rename(temp_filename, self.path)
-        try: os.chown(self.path, old_stat.st_uid, os.stat(self.path).st_gid)
-        except OSError: pass
-        try: os.chown(self.path, os.stat(self.path).st_uid, old_stat.st_gid)
-        except OSError: pass
-        try: os.chmod(self.path, old_stat.st_mode)
         except OSError as e:
-            warn("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
+            if e.errno == errno.EPERM:
+                os.rename(new_name, self.path)
+            else: raise
+        if old_stat is not None:
+            try: os.chown(self.path, old_stat.st_uid, os.stat(self.path).st_gid)
+            except OSError: pass
+            try: os.chown(self.path, os.stat(self.path).st_uid, old_stat.st_gid)
+            except OSError: pass
+            try: os.chmod(self.path, old_stat.st_mode)
+            except OSError as e:
+                warn("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
         clear_cached_properties(self)
 
     @property
