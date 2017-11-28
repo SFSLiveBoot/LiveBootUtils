@@ -995,7 +995,7 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
                 continue
             buf.append(data)
             if show_output:
-                sys_f.write(data)
+                sys_f.write(data.replace("\r\n", "\n").replace("\n", "\r\n"))
                 sys_f.flush()
             debug("%s: %r", log_tag, data.rstrip('\n'))
     stderr_data = "".join(stderr_buf).rstrip('\n')
