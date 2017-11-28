@@ -21,13 +21,16 @@ if __name__ == '__main__':
     arg0=os.path.basename(args.pop(0))
     try: command=args.pop(0)
     except IndexError:
-        warn("Usage: %s [--debug] <command> [<args..>]", arg0)
+        warn("Usage: %s [{--debug|--quiet}] <command> [<args..>]", arg0)
         info("Supported commands:%s",
              "".join(map(lambda (n, f): "\n\t%s\t%s"%(n, getattr(f, "_cli_desc", "")),
                          sorted(cli_func.commands.iteritems()))))
         raise SystemExit(1)
     if command=='--debug':
         logging.getLogger().setLevel(logging.DEBUG)
+        command=args.pop(0)
+    elif command=="--quiet":
+        logging.getLogger().setLevel(logging.WARN)
         command=args.pop(0)
     logging.getLogger().name=command
     try: cmd_func=cli_func.commands[command]
