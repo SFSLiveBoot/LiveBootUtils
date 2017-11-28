@@ -543,7 +543,7 @@ class Downloader(object):
 
     @cached_property
     def cache_dir(self):
-        cache_dir = os.path.expanduser("~/.cache/lbu/dl")
+        cache_dir = os.environ.get("dl_cache_dir", os.path.expanduser("~/.cache/lbu/dl"))
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir, 0755)
         return cache_dir
@@ -1180,4 +1180,4 @@ def build_sfs_dir(dest_dir, source_list, source_url=None):
 
 @cli_func(desc="Download file to cache and return filename")
 def dl_file(source, fname=None, cache_dir=None):
-    print dl.dl_file(source, fname, cache_dir)
+    return dl.dl_file(source, fname, cache_dir)
