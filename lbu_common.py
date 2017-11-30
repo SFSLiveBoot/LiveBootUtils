@@ -1302,6 +1302,8 @@ def build_sfs_dir(dest_dir, source_list, source_url=None):
         source_list = dl.dl_file(source_list).path
     for line in open(source_list):
         words = line.strip().split()
+        if not words or line.startswith("#"):
+            continue
         if '=' in words[0]:
             env_k, env_v = line.strip().split('=', 1)
             run_env[env_k] = env_v
