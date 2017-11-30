@@ -755,7 +755,7 @@ class Downloader(object):
                 break
             dest_f.write(d)
         dest_f.close()
-        lm_hdr = url_f.headers["Last-Modified"]
+        lm_hdr = url_f.headers.get("Last-Modified")
         if lm_hdr:
             mtime = parse_time(lm_hdr, self.http_time_format, "GMT")
             os.utime(dest_path_tmp, (time.time(), mtime))
