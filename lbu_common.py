@@ -13,6 +13,8 @@ from Crypto.Hash import MD5
 from logging import warn, info, debug
 
 
+lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
+
 class CommandFailed(EnvironmentError): pass
 
 
@@ -240,7 +242,7 @@ class SFSBuilder(object):
     LXC_LBU = "/opt/LiveBootUtils"
     LXC_INIT_CMD = ["sleep", os.environ.get("LXC_INIT_SLEEP", "7200")]
 
-    dest_dir_parent = os.path.expanduser("~/.cache/lbu/rebuild")
+    dest_dir_parent = os.path.join(lbu_cache_dir, "rebuild")
     default_lxc_parts = ["00-*", "scripts", "settings"]
 
     def __init__(self, target_sfs, source=None):
@@ -692,7 +694,7 @@ class Downloader(object):
 
     @cached_property
     def cache_dir(self):
-        cache_dir = os.environ.get("dl_cache_dir", os.path.expanduser("~/.cache/lbu/dl"))
+        cache_dir = os.environ.get("dl_cache_dir", os.path.join(lbu_cache_dir, "dl"))
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir, 0755)
         return cache_dir
