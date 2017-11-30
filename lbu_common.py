@@ -985,8 +985,9 @@ class MountPoint(FSPath):
     def is_mounted(self):
         if not self.exists: return False
         for e in global_mountinfo:
-            if os.path.samefile(e["mnt"], self.path):
-                return True
+            try: is_same = os.path.samefile(e["mnt"], self.path)
+            except OSError: continue
+            if is_same: return True
         return False
 
     def _find_mount_tab_entry(self):
