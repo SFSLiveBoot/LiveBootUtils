@@ -1296,6 +1296,8 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
 @cli_func(desc="Build SFS directory from sources")
 def build_sfs_dir(dest_dir, source_list, source_url=None):
     run_env = {}
+    if not os.path.exists(source_list):
+        source_list = dl.dl_file(source_list).path
     for line in open(source_list):
         words = line.strip().split()
         if '=' in words[0]:
