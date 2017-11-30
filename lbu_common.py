@@ -608,12 +608,14 @@ class FSPath(object):
     def __del__(self):
         if self._remove_on_del and self.exists:
             if os.path.islink(self.path):
-                os.unlink(self.path)
+                try: os.unlink(self.path)
+                except OSError as e:
+                    warn("Cannot unlink %r: %s", self.path, e)
             elif os.path.isdir(self.path):
                 try: os.rmdir(self.path)
                 except OSError as e:
                     if not e.errno==errno.ENOTEMPTY:
-                        raise
+                        warn("Cannot rmdir %r: %s", self.path, e)
             else:
                 raise ValueError("Refuse auto-remove files", self)
 
