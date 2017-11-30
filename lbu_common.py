@@ -355,6 +355,11 @@ class SFSBuilder(object):
 
     def build(self):
         apt_updated = False
+        if "PRE_BUILD_SCRIPT" in self.run_env:
+            run_command(["sh", "-c", self.run_env["PRE_BUILD_SCRIPT"], "_build.sh", self.dest_dir.path, self.lxc.name],
+                        as_user="root", show_output=True, env=self.run_env)
+        if "BUILD_SCRIPT" in self.run_env:
+            self.run_in_dest(["sh", "-c", self.run_env["BUILD_SCRIPT"]], show_output=True)
         for script in sorted(self.sfs_src_d.walk(pattern="[0-9][0-9]-*"), key=lambda p: p.basename):
             if not apt_updated:
                 self.run_in_dest(["apt-get", "update"], show_output=True)
