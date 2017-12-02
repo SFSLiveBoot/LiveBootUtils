@@ -917,7 +917,10 @@ class SFSFile(FSPath):
 
     def rebuild_and_replace(self, source=None, env=None):
         if isinstance(source, basestring):
-            source = dl.dl_file(source)
+            if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
+                source = GitRepo(source)
+            else:
+                source = dl.dl_file(source)
         builder = SFSBuilder(self, source)
         if env is not None:
             builder.run_env.update(**env)
