@@ -249,7 +249,12 @@ class SFSBuilder(object):
         if not isinstance(target_sfs, SFSFile):
             target_sfs = SFSFile(target_sfs)
         self.target = target_sfs
-        if source is None and target_sfs.exists:
+        if isinstance(source, basestring):
+            if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
+                source = GitRepo(source)
+            else:
+                source = dl.dl_file(source)
+        elif source is None and target_sfs.exists:
             source = target_sfs.git_source
         self.source = source
 
@@ -788,6 +793,8 @@ dl = Downloader()
 
 class SFSFile(FSPath):
     UPTDCHECK_PATH = os.path.join(SFSBuilder.SFS_SRC_D, '.check-up-to-date')
+    GIT_SOURCE_PATH = SFSBuilder.GIT_SOURCE_PATH
+    GIT_COMMIT_PATH = SFSBuilder.GIT_COMMIT_PATH
     PARTS_DIR='/.parts'
 
     progress_cb=None
@@ -856,7 +863,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def git_source(self):
-        try: git_source = self.open_file(SFSBuilder.GIT_SOURCE_PATH).read().strip()
+        try: git_source = self.open_file(self.GIT_SOURCE_PATH).read().strip()
         except IOError: return
         if '#' in git_source:
             git_source, self.git_branch = git_source.rsplit('#', 1)
@@ -866,7 +873,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def git_commit(self):
-        try: return self.open_file(SFSBuilder.GIT_COMMIT_PATH).read().strip()
+        try: return self.open_file(self.GIT_COMMIT_PATH).read().strip()
         except IOError: pass
 
     @cached_property
@@ -916,11 +923,6 @@ class SFSFile(FSPath):
         self.mounted_path = mnt
 
     def rebuild_and_replace(self, source=None, env=None):
-        if isinstance(source, basestring):
-            if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
-                source = GitRepo(source)
-            else:
-                source = dl.dl_file(source)
         builder = SFSBuilder(self, source)
         if env is not None:
             builder.run_env.update(**env)
