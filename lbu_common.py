@@ -1058,6 +1058,170 @@ class MountPoint(FSPath):
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
 
+class KVer(object):
+    def __init__(self, s):
+        self.value = map(lambda z: map(lambda y: int(y) if y.isdigit() else y, z.split(".")), s.split("-"))
+
+    def __str__(self):
+        return "-".join(map(lambda v: ".".join(map(str, v)), self.value))
+
+    def __cmp__(self, other):
+        if isinstance(other, KVer):
+            other = other.value
+        elif isinstance(other, (tuple, list)):
+            pass
+        else:
+            other = KVer(other).value
+        return cmp(self.value, other)
+
+
+class SourceList(FSPath):
+    source_url = None
+    kernel_fn_re = re.compile(r'.*?(?P<arch>x86_64|i[3-6]86)/(?:[0-9][0-9]-)?kernel-(?P<kver>[0-9]+\.[0-9].*)\.sfs$')
+
+    @cached_property
+    def run_env(self):
+        return {}
+
+    def __iter__(self):
+        src = self if self.exists else dl.dl_file(self.path)
+        for line in src.open():
+            words = line.strip().split()
+            if not words or line.startswith("#"):
+                continue
+            if '=' in words[0]:
+                env_k, env_v = line.strip().split('=', 1)
+                self.run_env[env_k] = env_v
+                continue
+            if len(words) > 1:
+                sfs_name, sfs_source_url = words
+            else:
+                sfs_name = words[0]
+                if self.source_url is None:
+                    raise ValueError("No source URL defined", sfs_name)
+                sfs_source_url = os.path.join(self.source_url, sfs_name)
+            if sfs_name == '*':
+                self.source_url = sfs_source_url
+                continue
+            kernel_m = self.kernel_fn_re.match(sfs_name)
+            if kernel_m:
+                self.kernel_sfs = sfs_name
+                self.arch = kernel_m.group("arch")
+                self.kver = KVer(kernel_m.group('kver'))
+            yield (sfs_source_url, sfs_name.lstrip('/'))
+
+
+class BootDirBuilder(FSPath):
+    dist_dirname = 'sfs'
+    build_targets = set(['efi', 'sfs', 'ramdisk', 'grubconf', 'vmlinuz'])
+    mkrd_src_url = "https://github.com/korc/make-ramdisk.git"
+
+    efi_mods = ["configfile", "ext2", "fat"'', "part_gpt", "part_msdos", "normal", "linux", "ls", "boot", "echo",
+                "reboot", "search", "search_fs_file", "search_fs_uuid", "search_label", "help", "ntfs", "ntfscomp",
+                "hfsplus", "chain", "multiboot", "terminal", "lspci", "font", "efi_gop", "efi_uga", "gfxterm"]
+    efi_arch = "x86_64-efi"
+    efi_src_d = FSPath("/usr/lib/grub").join(efi_arch)
+
+    @cached_property
+    def source_list(self):
+        return SourceList(self.source_list_url)
+
+    @cached_property
+    def mkrd_rw_d(self):
+        d = MountPoint(os.path.join(lbu_cache_dir, "mkrd-rw-%d" % (os.getpid(),)), auto_remove=True)
+        if not d.is_mounted:
+            d.mount("mkrd-rw", fs_type="tmpfs", mode="0755")
+        return d
+
+    @cached_property
+    def kernel_sfs(self):
+        return SFSFile(self.join(self.dist_dirname, self.source_list.kernel_sfs))
+
+    @cached_property
+    def arch_dir(self):
+        return self.join(self.dist_dirname, self.source_list.arch)
+
+    @cached_property
+    def kver(self):
+        return self.source_list.kver
+
+    @cached_property
+    def extra_dirs(self):
+        ret = []
+        for sfs_url, sfs_name in self.source_list:
+            if not '/' in sfs_name:
+                continue
+            sfs_base = os.path.dirname(sfs_name)
+            if sfs_base == self.source_list.arch:
+                continue
+            if sfs_base in ret:
+                continue
+            ret.append(sfs_base)
+        return ret
+
+    def build(self):
+        if 'sfs' in self.build_targets:
+            self.build_sfs()
+        if 'vmlinuz' in self.build_targets:
+            self.build_vmlinuz()
+        if 'ramdisk' in self.build_targets:
+            self.build_ramdisk()
+        if 'efi' in self.build_targets:
+            self.build_efi()
+        if 'grubconf' in self.build_targets:
+            self.build_grubconf()
+
+    def build_sfs(self):
+        info("Building sfs files to %s", self.dist_dirname)
+        source_list = self.source_list
+        for src_url, sfs_name in source_list:
+            dest_sfs = SFSFile(self.join(self.dist_dirname, sfs_name.lstrip('/')))
+            dest_sfs.parent_directory.makedirs()
+            if dest_sfs.exists and not dest_sfs.needs_update:
+                info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
+                continue
+            dest_sfs.rebuild_and_replace(src_url, env=source_list.run_env)
+
+    def build_vmlinuz(self):
+        info("Extracting vmlinuz-%s", self.kver)
+        with self.arch_dir.open_file("vmlinuz-%s" % (self.kver), "wb") as vmlnz:
+            vmlnz.write(self.kernel_sfs.open_file("boot/vmlinuz-%s" % (self.kver)).read())
+
+    def build_grubconf(self):
+        info("Creating grub config")
+        self.join("boot/grub").open_file("grub.cfg", "wb").write(
+            open(os.path.join(lbu_dir, "scripts", "grub.cfg")).read())
+
+        with self.join("grubvars.cfg").open("wb") as gcfg:
+            gcfg.write('set dist="%s"\n' % (self.dist_dirname,))
+            gcfg.write('set kver="%s"\n' % (self.kver,))
+            gcfg.write('set arch="%s"\n' % (self.arch_dir.basename,))
+            if self.extra_dirs:
+                gcfg.write('set extras="%s"' %(" ".join(self.extra_dirs)))
+
+    def build_efi(self):
+        info("Building EFI image (%s)", self.efi_arch)
+        efi_img = self.join("EFI", "Boot", "bootx64.efi")
+        efi_img.parent_directory.makedirs()
+        run_command(["install", "-D", "-t", self.join("boot/grub", self.efi_arch).path] +
+                    map(lambda n: n.path, self.efi_src_d.walk()))
+        run_command(["grub-mkimage", "-o", efi_img.path, "-O", self.efi_arch, "-p", "boot/grub"] + self.efi_mods)
+
+    def build_ramdisk(self):
+        info("Building ramdisk-%s", self.kver)
+        mkrd_git = dl.dl_file(self.mkrd_src_url)
+        arch_d = FSPath("usr/src/build/arch")
+        self.mkrd_rw_d.join("usr/src/make-ramdisk").makedirs(sudo=True)
+        self.mkrd_rw_d.join(arch_d.path).makedirs(sudo=True)
+        lxc = LXC.from_sfs("mkrd-build-%d" % (os.getpid(),), ["00-*", "scripts", "settings"],
+                           extra_parts=[self.mkrd_rw_d, self.kernel_sfs.realpath()],
+                           bind_dirs=[LXC.BindEntry(mkrd_git, "usr/src/make-ramdisk", True),
+                                      LXC.BindEntry(self.arch_dir.realpath(), arch_d)])
+        cmd = ["make", "-C", "/usr/src/make-ramdisk", "KVERS=%s" % (self.kver,),
+               "RAMDISK=/%s-%s" % (arch_d.join("ramdisk"), self.kver)]
+        lxc.run(cmd, env=self.source_list.run_env)
+
+
 @cli_func(desc="List AUFS original components")
 def aufs_components(directory='/'):
     fn_ts_re = re.compile(r'^(.+)\.([0-9]+)$')
@@ -1327,36 +1491,23 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
 
 @cli_func(desc="Build SFS directory from sources")
 def build_sfs_dir(dest_dir, source_list, source_url=None):
-    run_env = {}
-    if not os.path.exists(source_list):
-        source_list = dl.dl_file(source_list).path
-    for line in open(source_list):
-        words = line.strip().split()
-        if not words or line.startswith("#"):
-            continue
-        if '=' in words[0]:
-            env_k, env_v = line.strip().split('=', 1)
-            run_env[env_k] = env_v
-            continue
-        if len(words) > 1:
-            sfs_name, sfs_source_url = words
-        else:
-            sfs_name = words[0]
-            if source_url is None:
-                raise ValueError("No source URL defined", sfs_name)
-            sfs_source_url = os.path.join(source_url, sfs_name)
-        if sfs_name == '*':
-            source_url = sfs_source_url
-            continue
+    sources = SourceList(source_list, source_url=source_url)
+    for sfs_source_url, sfs_name in sources:
         dest_sfs = SFSFile(path=os.path.join(dest_dir, sfs_name.lstrip('/')))
         if not os.path.exists(dest_sfs.parent_directory.path):
             os.makedirs(dest_sfs.parent_directory.path, 0755)
         if dest_sfs.exists and not dest_sfs.needs_update:
             info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
             continue
-        dest_sfs.rebuild_and_replace(sfs_source_url, env=run_env)
+        dest_sfs.rebuild_and_replace(sfs_source_url, env=sources.run_env)
 
 
 @cli_func(desc="Download file to cache and return filename")
 def dl_file(source, fname=None, cache_dir=None):
     return dl.dl_file(source, fname, cache_dir)
+
+
+@cli_func(desc="Build a bootable directory")
+def build_boot_dir(path, source_list, dist_name="sfs"):
+    builder = BootDirBuilder(path, source_list_url=source_list, sfs_dirname=dist_name)
+    builder.build()
