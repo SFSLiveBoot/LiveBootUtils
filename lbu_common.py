@@ -503,6 +503,20 @@ class FSPath(object):
 
     def __str__(self): return self.path
 
+    def open(self, mode="rb"):
+        return open(self.path, mode)
+
+    def makedirs(self, mode=0755, sudo=False):
+        if not self.exists:
+            if sudo:
+                run_command(["mkdir", "-m", oct(mode), "-p", self.path], as_user="root")
+            else:
+                self.parent_directory.makedirs(mode)
+                os.mkdir(self.path, mode)
+
+    def realpath(self):
+        return FSPath(os.path.realpath(self.path))
+
     def walk(self, pattern=None, file_class=None, exclude=None):
         if pattern is None: pattern = self.walk_pattern
         if isinstance(pattern, basestring):
