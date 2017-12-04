@@ -255,13 +255,13 @@ class SFSBuilder(object):
         if not isinstance(target_sfs, SFSFile):
             target_sfs = SFSFile(target_sfs)
         self.target = target_sfs
+        if source is None and target_sfs.exists:
+            source = target_sfs.git_source
         if isinstance(source, basestring):
             if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
                 source = GitRepo(source)
             else:
                 source = dl.dl_file(source)
-        elif source is None and target_sfs.exists:
-            source = target_sfs.git_source
         self.source = source
 
     @cached_property
