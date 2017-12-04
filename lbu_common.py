@@ -378,13 +378,16 @@ class SFSBuilder(object):
             info("Running %s", script.basename)
             cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
             self.run_in_dest(cmd, show_output=True)
-        if self.source.join(".git-facls").exists:
-            self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
-        sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
-        if sqfs_excl.exists:
-            cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
+        if self.source is not None:
+            self.dest_dir.open_file(self.GIT_SOURCE_PATH, "wb").write(self.source.source_url)
+            self.dest_dir.open_file(self.GIT_COMMIT_PATH, "wb").write(self.source.last_commit)
+            if self.source.join(".git-facls").exists:
+                self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
+            sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
+            if sqfs_excl.exists:
+                cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
         run_command(cmd, show_output=True)
         self.target.replace_file(dst_temp)
 
@@ -696,6 +699,12 @@ class GitRepo(FSPath):
     @cached_property
     def last_commit(self):
         return run_command(['git', 'log', '-1', '--format=%H'], cwd=self.path)
+
+    @cached_property
+    def source_url(self):
+        status = run_command(["git", "status", "-b", "-s"], cwd=self.path)
+        remote, branch = status.split("...")[1].split()[0].split('/')
+        return "%s#%s"%(run_command(["git", "remote", "get-url", remote], cwd=self.path), branch)
 
     @cached_property
     def last_stamp(self):
