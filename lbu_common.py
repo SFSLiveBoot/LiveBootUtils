@@ -14,6 +14,7 @@ from logging import warn, info, debug
 
 
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
+lbu_dir = os.path.dirname(__file__)
 
 class CommandFailed(EnvironmentError): pass
 
@@ -203,9 +204,9 @@ class LXC(object):
     @classmethod
     def from_sfs(cls, name, sfs_parts, extra_parts=[], bind_dirs=[], **attrs):
         cmd = ["lxc-create", "-t", "sfs", "-n", name, "--",
-               "--default-parts", " ".join(sfs_parts), "--host-network"]
+               "--default-parts", " ".join(map(str, sfs_parts)), "--host-network"]
         cmd.extend(reduce(lambda a, b: a + ["--bind-ro" if b.ro else "--bind", str(b)], bind_dirs, []))
-        cmd.extend(extra_parts)
+        cmd.extend(map(str, extra_parts))
         run_command(cmd, as_user="root")
         if "auto_remove" not in attrs:
             attrs["auto_remove"] = True
@@ -223,7 +224,12 @@ class LXC(object):
     def run(self, cmd, **args):
         if not self.is_running:
             self.start()
-        return run_command(["lxc-attach", "-e", "-n", self.name, "--"] + cmd, as_user="root", **args)
+        try: return run_command(["lxc-attach", "-e", "-n", self.name, "--"] + cmd, as_user="root", **args)
+        except CommandFailed:
+            if "LXC_RUN_FAILSCRIPT" in os.environ:
+                run_command(["sh", "-c", os.environ["LXC_RUN_FAILSCRIPT"], "_fail.sh", self.name] + cmd,
+                            show_output=True, **args)
+            raise
 
     def shutdown(self):
         run_command(["lxc-stop", "-k", "-n", self.name], as_user="root")
