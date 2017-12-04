@@ -328,7 +328,7 @@ class SFSBuilder(object):
 
     @cached_property
     def deb_mappings(self):
-        ret = [(os.path.join(dl.cache_dir, "apt"), "var/cache/apt/archives"),
+        ret = [(os.path.join(dl.cache_dir, "archives"), "var/cache/apt/archives"),
                (os.path.join(dl.cache_dir, "lists"), "var/lib/apt/lists")]
         for p in ret:
             if not os.path.exists(p[0]):
@@ -1130,6 +1130,9 @@ class BootDirBuilder(FSPath):
                 "hfsplus", "chain", "multiboot", "terminal", "lspci", "font", "efi_gop", "efi_uga", "gfxterm"]
     efi_arch = "x86_64-efi"
     efi_src_d = FSPath("/usr/lib/grub").join(efi_arch)
+    iso_output = None
+    kernel_append = None
+    serial_console = None
 
     @cached_property
     def source_list(self):
@@ -1179,6 +1182,8 @@ class BootDirBuilder(FSPath):
             self.build_efi()
         if 'grubconf' in self.build_targets:
             self.build_grubconf()
+        if self.iso_output:
+            run_command(["grub-mkrescue", "-o", self.iso_output, self.path], show_output=True)
 
     def build_sfs(self):
         info("Building sfs files to %s", self.dist_dirname)
@@ -1206,7 +1211,11 @@ class BootDirBuilder(FSPath):
             gcfg.write('set kver="%s"\n' % (self.kver,))
             gcfg.write('set arch="%s"\n' % (self.arch_dir.basename,))
             if self.extra_dirs:
-                gcfg.write('set extras="%s"' %(" ".join(self.extra_dirs)))
+                gcfg.write('set extras="%s"\n' % (" ".join(self.extra_dirs)))
+            if self.kernel_append:
+                gcfg.write('set append="%s"\n' % (self.kernel_append,))
+            if self.serial_console:
+                gcfg.write('set ser_cons="%s"\n' % (self.serial_console,))
 
     def build_efi(self):
         info("Building EFI image (%s)", self.efi_arch)
@@ -1517,6 +1526,6 @@ def dl_file(source, fname=None, cache_dir=None):
 
 
 @cli_func(desc="Build a bootable directory")
-def build_boot_dir(path, source_list, dist_name="sfs"):
-    builder = BootDirBuilder(path, source_list_url=source_list, sfs_dirname=dist_name)
+def build_boot_dir(path, source_list, dist_name="sfs", iso_output=None):
+    builder = BootDirBuilder(path, source_list_url=source_list, dist_dirname=dist_name, iso_output=iso_output)
     builder.build()
