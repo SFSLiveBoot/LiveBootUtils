@@ -1406,9 +1406,14 @@ def sfs_stamp(src):
 
 
 @cli_func(desc="Rebuild a SFS file, optionally from specified source")
-def rebuild_sfs(target, source=None):
+def rebuild_sfs(target, source=None, *env_vars):
     sfs = SFSFile(target)
-    sfs.rebuild_and_replace(source)
+    if source=="": source=None
+    env = {}
+    for kv in env_vars:
+        k, v = kv.split("=", 1)
+        env[k] = v
+    sfs.rebuild_and_replace(source, env=env)
 
 
 def _sfs_nfo_func(fname):
