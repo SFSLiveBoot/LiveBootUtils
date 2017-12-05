@@ -328,11 +328,11 @@ class SFSBuilder(object):
 
     @cached_property
     def deb_mappings(self):
-        ret = [(os.path.join(dl.cache_dir, "archives"), "var/cache/apt/archives"),
-               (os.path.join(dl.cache_dir, "lists"), "var/lib/apt/lists")]
+        cache_dir = FSPath(dl.cache_dir)
+        ret = [(cache_dir.join("archives"), "var/cache/apt/archives"),
+               (cache_dir.join("lists"), "var/lib/apt/lists")]
         for p in ret:
-            if not os.path.exists(p[0]):
-                os.makedirs(p[0], 0755)
+            p[0].join("partial").makedirs()
         return ret
 
     @cached_property
@@ -381,8 +381,10 @@ class SFSBuilder(object):
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
-            self.dest_dir.open_file(self.GIT_SOURCE_PATH, "wb").write(self.source.source_url)
-            self.dest_dir.open_file(self.GIT_COMMIT_PATH, "wb").write(self.source.last_commit)
+            git_source_url = self.source.source_url
+            if git_source_url is not None:
+                self.dest_dir.open_file(self.GIT_SOURCE_PATH, "wb").write(git_source_url)
+                self.dest_dir.open_file(self.GIT_COMMIT_PATH, "wb").write(self.source.last_commit)
             if self.source.join(".git-facls").exists:
                 self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
@@ -702,8 +704,9 @@ class GitRepo(FSPath):
 
     @cached_property
     def source_url(self):
-        status = run_command(["git", "status", "-b", "-s"], cwd=self.path)
-        remote, branch = status.split("...")[1].split()[0].split('/')
+        try: remote, branch = run_command(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=self.path).split("/")
+        except CommandFailed:
+            return None
         return "%s#%s"%(run_command(["git", "remote", "get-url", remote], cwd=self.path), branch)
 
     @cached_property
