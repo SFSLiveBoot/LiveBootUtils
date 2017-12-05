@@ -929,7 +929,7 @@ class SFSFile(FSPath):
         if self.mounted_path == None:
             self.mount()
         try:
-            run_command(self.mounted_path.join(self.UPTDCHECK_PATH),
+            run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
                         show_output=True, env=dict(DESTDIR=self.mounted_path.path))
         except CommandFailed as e:
             return int(time.time())
