@@ -707,7 +707,7 @@ class GitRepo(FSPath):
         try: remote, branch = run_command(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=self.path).split("/")
         except CommandFailed:
             return None
-        return "%s#%s"%(run_command(["git", "remote", "get-url", remote], cwd=self.path), branch)
+        return "%s#%s" % (run_command(["git", "config", "--get", "remote.%s.url" % (remote,)], cwd=self.path), branch)
 
     @cached_property
     def last_stamp(self):
