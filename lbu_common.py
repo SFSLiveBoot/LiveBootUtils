@@ -1154,11 +1154,19 @@ class BootDirBuilder(FSPath):
 
     @cached_property
     def arch_dir(self):
-        return self.join(self.dist_dirname, self.source_list.arch)
+        return self.join(self.dist_dirname, self.arch)
+
+    @cached_property
+    def arch(self):
+        return self.source_list.arch
 
     @cached_property
     def kver(self):
         return self.source_list.kver
+
+    @cached_property
+    def run_env(self):
+        return self.source_list.run_env
 
     @cached_property
     def extra_dirs(self):
@@ -1181,6 +1189,8 @@ class BootDirBuilder(FSPath):
             self.build_vmlinuz()
         if 'ramdisk' in self.build_targets:
             self.build_ramdisk()
+        if 'ramdisk_net' in self.build_targets:
+            self.build_ramdisk(NET='1')
         if 'efi' in self.build_targets:
             self.build_efi()
         if 'grubconf' in self.build_targets:
@@ -1228,19 +1238,23 @@ class BootDirBuilder(FSPath):
                     map(lambda n: n.path, self.efi_src_d.walk()))
         run_command(["grub-mkimage", "-o", efi_img.path, "-O", self.efi_arch, "-p", "boot/grub"] + self.efi_mods)
 
-    def build_ramdisk(self):
+    def build_ramdisk(self, **makeargs):
         info("Building ramdisk-%s", self.kver)
         mkrd_git = dl.dl_file(self.mkrd_src_url)
         arch_d = FSPath("usr/src/build/arch")
         self.mkrd_rw_d.join("usr/src/make-ramdisk").makedirs(sudo=True)
         self.mkrd_rw_d.join(arch_d.path).makedirs(sudo=True)
+        self.arch_dir.makedirs()
         lxc = LXC.from_sfs("mkrd-build-%d" % (os.getpid(),), ["00-*", "scripts", "settings"],
                            extra_parts=[self.mkrd_rw_d, self.kernel_sfs.realpath()],
                            bind_dirs=[LXC.BindEntry(mkrd_git, "usr/src/make-ramdisk", True),
                                       LXC.BindEntry(self.arch_dir.realpath(), arch_d)])
-        cmd = ["make", "-C", "/usr/src/make-ramdisk", "KVERS=%s" % (self.kver,),
-               "RAMDISK=/%s-%s" % (arch_d.join("ramdisk"), self.kver)]
-        lxc.run(cmd, env=self.source_list.run_env)
+        if "KVER" not in makeargs:
+            makeargs["KVERS"] = self.kver
+        if "RAMDISK_DESTDIR" not in makeargs:
+            makeargs["RAMDISK_DESTDIR"] = "/%s/" % (arch_d,)
+        cmd = ["make", "-C", "/usr/src/make-ramdisk"] + map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
+        lxc.run(cmd, env=self.run_env)
 
 
 @cli_func(desc="List AUFS original components")
@@ -1537,3 +1551,12 @@ def dl_file(source, fname=None, cache_dir=None):
 def build_boot_dir(path, source_list, dist_name="sfs", iso_output=None):
     builder = BootDirBuilder(path, source_list_url=source_list, dist_dirname=dist_name, iso_output=iso_output)
     builder.build()
+
+@cli_func(desc="Build ramdisk")
+def build_ramdisk(dest_dir, kver, arch, kernel_sfs, *makerd_args):
+    makeargs = {}
+    for opt in makerd_args:
+        k, v = opt.split('=', 1)
+        makeargs[k] = v
+    builder = BootDirBuilder(dest_dir, arch=arch, kver=kver, kernel_sfs=SFSFile(kernel_sfs), run_env={})
+    builder.build_ramdisk(**makeargs)
