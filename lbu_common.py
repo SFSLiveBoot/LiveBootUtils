@@ -1110,8 +1110,9 @@ class SourceList(FSPath):
             else:
                 sfs_name = words[0]
                 if self.source_url is None:
-                    raise ValueError("No source URL defined", sfs_name)
-                sfs_source_url = os.path.join(self.source_url, sfs_name)
+                    sfs_source_url = None
+                else:
+                    sfs_source_url = os.path.join(self.source_url, sfs_name)
             if sfs_name == '*':
                 self.source_url = sfs_source_url
                 continue
