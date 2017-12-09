@@ -414,12 +414,17 @@ class SFSDirectory(object):
 
     @cached_property
     def all_sfs(self):
-        return list(self.backend.walk(file_class=SFSFile))
+        return list(sorted(self.backend.walk(file_class=SFSFile), key=lambda s: s.basename))
 
     def find_sfs(self, name):
         for sfs in self.all_sfs:
             if sfs.basename==name:
                 return sfs
+
+    def find_all_sfs(self, name):
+        for sfs in self.all_sfs:
+            if sfs.basename == name:
+                yield sfs
 
 
 class SFSDirectoryAufs(SFSDirectory):
@@ -844,11 +849,29 @@ class SFSFile(FSPath):
             if fnmatch.fnmatch(self, "[0-9][0-9]-*"):
                 return int(self[:2])
             else:
-                return 99
+                return None
+
+        @repr_wrap(as_str=True)
+        def __repr__(self):
+            return "[%s] %r"%(self.prio(), self.strip_down())
 
         def __eq__(self, other):
             if super(SFSFile.SFSBasename, self) == other: return True
-            return self.strip_down()==SFSFile.SFSBasename(other).strip_down()
+            #print "Comparing %s to %r"%(self, other)
+            other = SFSFile.SFSBasename(other)
+            other_prio = other.prio()
+            if other_prio is not None:
+                self_prio = self.prio()
+                if self_prio is not None and not self_prio == other_prio:
+                    #print "Priority mismatch"
+                    return False
+            if self.strip_down()==other.strip_down():
+                return True
+            try: without_sfs = self[:self.rindex('.sfs')]
+            except ValueError: without_sfs = self
+            if fnmatch.fnmatch(without_sfs, str(other)):
+                return True
+            return False
 
     def validate_sfs(self):
         if not os.path.isfile(self.path): return False
@@ -946,7 +969,8 @@ class SFSFile(FSPath):
     def mount(self, mountdir=None):
         if mountdir is None:
             mountdir = os.path.join(self.PARTS_DIR, "%02d-%s.%d" % (
-                self.basename.prio(), self.basename.strip_down(), self.create_stamp))
+                (lambda x: 99 if x is None else x)(self.basename.prio()),
+                self.basename.strip_down(), self.create_stamp))
             if not os.path.exists(mountdir):
                 run_command(['mkdir', '-p', mountdir], as_user='root')
         mnt = MountPoint(mountdir)
@@ -1561,3 +1585,24 @@ def build_ramdisk(dest_dir, kver, arch, kernel_sfs, *makerd_args):
         makeargs[k] = v
     builder = BootDirBuilder(dest_dir, arch=arch, kver=kver, kernel_sfs=SFSFile(kernel_sfs), run_env={})
     builder.build_ramdisk(**makeargs)
+
+
+@cli_func(desc="Locate specified SFS files")
+def locate_sfs(*names):
+    ret = []
+    sfs_paths = {}
+    for entry in global_mountinfo:
+        if not entry["fs_type"] == "squashfs":
+            continue
+        mpt = MountPoint(entry["mnt"])
+        p = FSPath(mpt.loop_backend).parent_directory.path
+        sfs_paths[p] = SFSDirectory(p)
+    for name in names:
+        ret_name = []
+        for sfs_dir in sfs_paths.values():
+            ret_name.extend(map(lambda sfs: sfs.curlink_sfs(), sfs_dir.find_all_sfs(name)))
+        if not ret_name:
+            raise ValueError("No matching sfs found", name)
+        ret_name.sort(key=lambda sfs: sfs.create_stamp)
+        ret.append(ret_name[0])
+    return ret
