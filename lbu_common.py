@@ -1229,6 +1229,11 @@ class BootDirBuilder(FSPath):
         for src_url, sfs_name in source_list:
             dest_sfs = SFSFile(self.join(self.dist_dirname, sfs_name.lstrip('/')))
             dest_sfs.parent_directory.makedirs()
+            if os.path.isfile(src_url):
+                src_sfs = SFSFile(src_url)
+                if not dest_sfs.exists or src_sfs.create_stamp > dest_sfs.create_stamp:
+                    dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size))
+                continue
             if dest_sfs.exists and not dest_sfs.needs_update:
                 info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
                 continue
