@@ -16,6 +16,15 @@ from logging import warn, info, debug
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
 lbu_dir = os.path.dirname(__file__)
 
+
+# patch urllib to work with "with" statement
+if hasattr(urllib2, "addinfourl"):
+    if not hasattr(urllib2.addinfourl, '__exit__'):
+        urllib2.addinfourl.__exit__ = lambda u, *args: u.close()
+    if not hasattr(urllib2.addinfourl, '__enter__'):
+        urllib2.addinfourl.__enter__ = lambda u: u
+
+
 class CommandFailed(EnvironmentError): pass
 
 
@@ -463,6 +472,11 @@ class FSPath(object):
     def __new__(cls, path, **attrs):
         if cls==FSPath and path.endswith('.sfs'):
             cls=SFSFile
+        if isinstance(path, basestring) and (path.startswith('http://') or path.startswith('https://')):
+            cls = type('%s_url' % (cls.__name__,), (cls,), dict(
+                file_size=cached_property(cls._url_file_size),
+                open=cls._url_open,
+            ))
         return super(FSPath, cls).__new__(cls, path, **attrs)
 
     def __init__(self, path, **attrs):
@@ -515,6 +529,9 @@ class FSPath(object):
 
     def open(self, mode="rb"):
         return open(self.path, mode)
+
+    def _url_open(self, mode="rb"):
+        return urllib2.urlopen(self.path)
 
     def makedirs(self, mode=0755, sudo=False):
         if not self.exists:
@@ -575,6 +592,15 @@ class FSPath(object):
 
     @cached_property
     def file_size(self): return os.stat(self.path).st_size
+
+    @cached_property
+    def fobj(self):
+        return self.open()
+
+    def _url_file_size(self):
+        clen = self.fobj.headers.get("Content-Length")
+        if clen is not None:
+            return int(clen)
 
     @cached_property
     def mountpoint(self):
@@ -905,9 +931,6 @@ class SFSFile(FSPath):
     def _get_create_stamp(header):
         return struct.unpack("<L", header[8:12])[0]
 
-    def open(self, mode="rb"):
-        return open(self.path, mode)
-
     @cached_property
     def mounted_path(self):
         ldev = self.loop_dev
@@ -1227,9 +1250,11 @@ class BootDirBuilder(FSPath):
         info("Building sfs files to %s", self.dist_dirname)
         source_list = self.source_list
         for src_url, sfs_name in source_list:
+            info("Building: %s -> %s", src_url, sfs_name)
             dest_sfs = SFSFile(self.join(self.dist_dirname, sfs_name.lstrip('/')))
             dest_sfs.parent_directory.makedirs()
-            if os.path.isfile(src_url):
+            if os.path.isfile(src_url) or (
+                    (src_url.endswith('.sfs') and src_url.startswith('http://') or src_url.startswith('http://'))):
                 src_sfs = SFSFile(src_url)
                 if not dest_sfs.exists or src_sfs.create_stamp > dest_sfs.create_stamp:
                     dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size))
