@@ -12,7 +12,6 @@ import pwd
 from Crypto.Hash import MD5
 from logging import warn, info, debug
 
-
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
 lbu_dir = os.path.dirname(__file__)
 
@@ -512,7 +511,7 @@ class FSPath(object):
     _remove_on_del = False
 
     def __new__(cls, path, **attrs):
-        if cls==FSPath and path.endswith('.sfs'):
+        if cls==FSPath and path.rstrip(".0123456789").endswith('.sfs'):
             cls=SFSFile
         if isinstance(path, basestring) and (path.startswith('http://') or path.startswith('https://')):
             cls = type('%s_url' % (cls.__name__,), (cls,), dict(
@@ -1086,7 +1085,8 @@ class MountPoint(FSPath):
     def __del__(self):
         if self._remove_on_del:
             self.umount()
-        super(MountPoint, self).__del__()
+        if MountPoint is not None:
+            super(MountPoint, self).__del__()
 
     @cached_property
     def fs_type(self): return self._find_mount_tab_entry().fs_type
