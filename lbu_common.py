@@ -244,6 +244,47 @@ class LXC(object):
         run_command(["lxc-stop", "-k", "-n", self.name], as_user="root")
 
 
+class SFSFinder(object):
+    def __init__(self, sfs_list=None):
+        if sfs_list is None:
+            sfs_list = []
+        self.sfs_list = []
+        for sfs in sfs_list:
+            self.register_sfs(sfs)
+
+    @cached_property
+    def _sfs_dirs(self):
+        return dict(map(lambda p: (p, SFSDirectory(p)),
+                        map(lambda e: FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path,
+                            filter(lambda e: e["fs_type"] == "squashfs", global_mountinfo))))
+
+    def search_dirs(self, name, sfs_dirs=None):
+        sfs_found = []
+        if sfs_dirs is None:
+            sfs_dirs = self._sfs_dirs.values()
+        for sfs_dir in sfs_dirs:
+            sfs_found.extend(map(lambda sfs: sfs.curlink_sfs(), sfs_dir.find_all_sfs(name)))
+        sfs_found.sort(key=lambda sfs: sfs.create_stamp)
+        if sfs_found:
+            return sfs_found[0]
+
+    def register_sfs(self, sfs):
+        self.sfs_list.insert(0, sfs)
+
+    def __getitem__(self, name):
+        for sfs in self.sfs_list:
+            if sfs.basename == name and sfs.exists:
+                return sfs
+        sfs = self.search_dirs(name)
+        if sfs:
+            self.register_sfs(sfs)
+            return sfs
+        raise KeyError("Cannot find SFS", name)
+
+
+sfs_finder = SFSFinder()
+
+
 class SFSBuilder(object):
     SFS_SRC_D = '/usr/src/sfs.d'
     GIT_SOURCE_PATH = os.path.join(SFS_SRC_D, '.git-source')
@@ -401,6 +442,7 @@ class SFSBuilder(object):
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
         run_command(cmd, show_output=True)
         self.target.replace_file(dst_temp)
+        sfs_finder.register_sfs(self.target)
 
 
 class SFSDirectory(object):
@@ -1025,6 +1067,7 @@ class SFSFile(FSPath):
             if progress_cb: progress_cb(None)
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
+        sfs_finder.register_sfs(self)
 
     @cached_property
     def needs_update(self):
@@ -1620,19 +1663,7 @@ def build_ramdisk(dest_dir, kver, arch, kernel_sfs, *makerd_args):
 @cli_func(desc="Locate specified SFS files")
 def locate_sfs(*names):
     ret = []
-    sfs_paths = {}
-    for entry in global_mountinfo:
-        if not entry["fs_type"] == "squashfs":
-            continue
-        mpt = MountPoint(entry["mnt"])
-        p = FSPath(mpt.loop_backend).parent_directory.path
-        sfs_paths[p] = SFSDirectory(p)
     for name in names:
-        ret_name = []
-        for sfs_dir in sfs_paths.values():
-            ret_name.extend(map(lambda sfs: sfs.curlink_sfs(), sfs_dir.find_all_sfs(name)))
-        if not ret_name:
-            raise ValueError("No matching sfs found", name)
-        ret_name.sort(key=lambda sfs: sfs.create_stamp)
-        ret.append(ret_name[0])
+        try: ret.append(sfs_finder[name])
+        except KeyError: pass
     return ret
