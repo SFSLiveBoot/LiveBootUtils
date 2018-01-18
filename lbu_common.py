@@ -1393,6 +1393,23 @@ def aufs_components(directory='/'):
     return ret
 
 
+@cli_func(desc="Get basic info about SFS file")
+def sfs_info(filename):
+    sfs = SFSFile(filename)
+    ret = dict(basename=dict(stripped=sfs.basename.strip_down(), priority=sfs.basename.prio()),
+               realpath=sfs.realpath().path,
+               create_stamp=stamp2txt(sfs.create_stamp),
+               size=sfs.file_size,
+               git_source=sfs.git_source,
+               git_commit=sfs.git_commit,
+               git_branch=sfs.git_branch,
+               curlink_sfs=sfs.curlink_sfs().path)
+    for k, v in ret.items():
+        if v is None:
+            del ret[k]
+    return ret
+
+
 @cli_func(desc="Find out the primary SFS file")
 def get_root_sfs():
     test_file=FSPath("/bin/true")
