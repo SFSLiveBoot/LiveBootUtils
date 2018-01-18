@@ -1159,6 +1159,24 @@ class MountPoint(FSPath):
         if not loop_name.startswith("loop"): raise NotLoopDev("Mountpoint does not seem to be loop device", loop_name)
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
+    def mount_combined(self, parts):
+        dirs = []
+        for part in parts:
+            if isinstance(part, basestring):
+                if os.path.exists(part):
+                    part = FSPath(part)
+                else:
+                    part = sfs_finder[part]
+            if isinstance(part, SFSFile):
+                if not part.mounted_path:
+                    part.mount()
+                part = part.mounted_path
+            dirs.append("%s=ro" % (part.path,))
+        rw_mount = MountPoint(FSPath(lbu_cache_dir).join("aufs-rw-%s-%s"%(os.getpid(), time.time())))
+        rw_mount.mount("aufs-rw", fs_type="tmpfs", mode="0755")
+        dirs.append("%s=rw" % (rw_mount.path,))
+        self.mount("aufs-src", dirs=":".join(reversed(dirs)), fs_type="aufs")
+
 
 class KVer(object):
     def __init__(self, s):
@@ -1667,3 +1685,7 @@ def locate_sfs(*names):
         try: ret.append(sfs_finder[name])
         except KeyError: pass
     return ret
+
+@cli_func(desc="Mount combined filesystem from different parts")
+def mount_combined(dest_dir, parts):
+    MountPoint(dest_dir).mount_combined(parts.split())
