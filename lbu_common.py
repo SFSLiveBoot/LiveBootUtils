@@ -1315,7 +1315,7 @@ class BootDirBuilder(FSPath):
             dest_sfs = SFSFile(self.join(self.dist_dirname, sfs_name.lstrip('/')))
             dest_sfs.parent_directory.makedirs()
             if os.path.isfile(src_url) or (
-                    (src_url.endswith('.sfs') and src_url.startswith('http://') or src_url.startswith('http://'))):
+                    (src_url.endswith('.sfs') and (src_url.startswith('http://') or src_url.startswith('https://')))):
                 src_sfs = SFSFile(src_url)
                 if not dest_sfs.exists or src_sfs.create_stamp > dest_sfs.create_stamp:
                     dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size))
@@ -1365,7 +1365,7 @@ class BootDirBuilder(FSPath):
                            extra_parts=[self.mkrd_rw_d, self.kernel_sfs.realpath()],
                            bind_dirs=[LXC.BindEntry(mkrd_git, "usr/src/make-ramdisk", True),
                                       LXC.BindEntry(self.arch_dir.realpath(), arch_d)])
-        if "KVER" not in makeargs:
+        if "KVERS" not in makeargs:
             makeargs["KVERS"] = self.kver
         if "RAMDISK_DESTDIR" not in makeargs:
             makeargs["RAMDISK_DESTDIR"] = "/%s/" % (arch_d,)
