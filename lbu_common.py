@@ -145,6 +145,23 @@ class CLIProgressReporter(object):
 pr_cls = CLIProgressReporter
 
 
+class TemplatedString(object):
+    template = ""
+
+    def __init__(self, **attrs):
+        for k in attrs:
+            setattr(self, k, attrs[k])
+
+    def __str__(self):
+        return self.template % self
+
+    def __getitem__(self, item):
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            return KeyError
+
+
 class LXC(object):
     auto_remove = False
     init_cmd = []
@@ -165,6 +182,148 @@ class LXC(object):
         @repr_wrap(as_str=True)
         def __repr__(self):
             return "%r -> %r%s"%(self.src, self.dst, " [RO]" if self.ro else "")
+
+    class Config(TemplatedString):
+        template = """
+lxc.utsname = %(name)s
+lxc.rootfs = %(rootfs)s
+lxc.pts = 1024
+lxc.kmsg = 0
+
+lxc.loglevel = 1
+lxc.autodev = 1
+lxc.mount.auto = proc sys
+lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(sfs_parts)s"'
+
+# use .drop instead of .keep if you want less restritive environment
+%(cap_cfg)s
+%(dev_cfg)s
+%(extra_config)s
+        """
+
+        @cached_property
+        def dev_cfg(self):
+            if self.devices_allow is None:
+                return ""
+            return "\n".join(["lxc.cgroup.devices.deny = a"] + map(
+                lambda d: "lxc.cgroup.devices.allow = %s" % d, self.devices_allow))
+
+        @cached_property
+        def devices_allow(self):
+            return ["c 1:8 r", "c 1:9 r", "c 1:5 r",
+                    "c 1:3 rw", "c 1:7 rw", "c 5:0 rw",
+                    "c 136:* rw"]
+
+        @cached_property
+        def cap_cfg(self):
+            if self.cap_keep:
+                return "lxc.cap.keep = %s" % (" ".join(self.cap_keep, ))
+            elif self.cap_drop:
+                return "lxc.cap.drop = %s" % (" ".join(self.cap_drop, ))
+            else:
+                return ""
+
+        @cached_property
+        def cap_drop(self):
+            return {"sys_module", "mac_admin", "mac_override", "sys_time"}
+
+        @cached_property
+        def cap_keep(self):
+            return {"sys_chroot", "sys_admin", "dac_override", "chown fowner", "kill", "ipc_owner", "ipc_lock",
+                    "setgid", "setuid", "sys_nice", "syslog", "lease", "dac_read_search", "audit_write", "setpcap",
+                    "net_bind_service", "sys_resource", "net_broadcast", "net_admin", "net_raw"}
+
+        @cached_property
+        def lbu_cli(self):
+            return FSPath(__file__).parent_directory.join("lbu_cli.py")
+
+        @cached_property
+        def rootfs(self):
+            return "/run/lxc/root/%s" % (self.name,)
+
+        @cached_property
+        def extra_config(self):
+            return "\n".join(map(str, self.extra_parts))
+
+        class MountEntry(TemplatedString):
+            template = "lxc.mount.entry = %(src_esc)s %(dst)s none %(opts)s 0 0"
+
+            @cached_property
+            def src_esc(self):
+                return self.src.replace(" ", "\\040")
+
+            @cached_property
+            def opts(self):
+                return ",".join(["bind"] + (["ro"] if self.ro else []))
+
+            def __init__(self, src, dst, ro=False):
+                TemplatedString.__init__(self, src=src, dst=dst, ro=ro)
+
+        class VEth(TemplatedString):
+            template = """
+lxc.network.type = veth
+lxc.network.flags = up
+%(link_cfg)s
+%(ip_cfg)s
+%(gw_cfg)s
+lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
+            veth_up_script = 'iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off'
+
+            @cached_property
+            def link_cfg(self):
+                return "lxc.network.link = %s" % (self.link,) if self.link else ""
+
+            @cached_property
+            def ip_cfg(self):
+                return "lxc.network.ipv4 = %s" % (self.ip,) if self.ip else ""
+
+            @cached_property
+            def gw_cfg(self):
+                return "lxc.network.ipv4.gateway = %s" % (self.gw,) if self.gw else ""
+
+            def __init__(self, link, ip=None, gw=None):
+                TemplatedString.__init__(self, link=link, ip=ip, gw=gw)
+
+        class VLan(TemplatedString):
+            template = """
+lxc.network.type = macvlan
+lxc.network.macvlan.mode = bridge
+lxc.network.flags = up
+lxc.network.link = %(link)s
+%(ip_cfg)s
+%(gw_cfg)s"""
+
+            @cached_property
+            def ip_cfg(self):
+                return "lxc.network.ipv4 = %s" % (self.ip,) if self.ip else ""
+
+            @cached_property
+            def gw_cfg(self):
+                return "lxc.network.ipv4.gateway = %s" % (self.gw,) if self.gw else ""
+
+            def __init__(self, link, ip=None, gw=None):
+                TemplatedString.__init__(self, link=link, ip=ip, gw=gw)
+
+        def __init__(self, name, **attrs):
+            self.name = name
+            self.extra_parts = []
+            TemplatedString.__init__(self, **attrs)
+
+        def add_vlan(self, link, ip=None, gw=None):
+            self.extra_parts.append(self.VLan(link, ip, gw))
+
+        def add_veth(self, link, ip=None, gw=None):
+            self.extra_parts.append(self.VEth(link, ip, gw))
+
+        def add_bind(self, src, dst=None, ro=False):
+            if isinstance(src, LXC.BindEntry):
+                src, dst, ro = src.src, src.dst, src.ro
+            if dst is None:
+                dst = src.lstrip("/")
+            self.extra_parts.append(self.MountEntry(src, dst, ro))
+
+        def add_hostnet(self):
+            self.extra_parts.append("lxc.network.type=none")
 
     def __init__(self, name=None, **attrs):
         if name is None:
@@ -210,7 +369,7 @@ class LXC(object):
         except CommandFailed: return False
 
     @classmethod
-    def from_sfs(cls, name, sfs_parts, extra_parts=[], bind_dirs=[], **attrs):
+    def from_sfs_ext(cls, name, sfs_parts, extra_parts=[], bind_dirs=[], **attrs):
         cmd = ["lxc-create", "-t", "sfs", "-n", name, "--",
                "--default-parts", " ".join(map(str, sfs_parts)), "--host-network"]
         cmd.extend(reduce(lambda a, b: a + ["--bind-ro" if b.ro else "--bind", str(b)], bind_dirs, []))
@@ -220,6 +379,26 @@ class LXC(object):
             attrs["auto_remove"] = True
         return cls(name, **attrs)
 
+    @classmethod
+    def from_sfs(cls, name, sfs_parts, bind_dirs=None, **attrs):
+        all_parts = attrs["all_parts"] = map(
+            lambda s: s if isinstance(s, FSPath) else FSPath(s) if FSPath(s).exists else sfs_finder[s],
+            sfs_parts)
+        for part in all_parts:
+            if isinstance(part, SFSFile):
+                if part.mounted_path is None:
+                    part.mount()
+        cfg = LXC.Config(name, sfs_parts=" ".join(map(str, all_parts)))
+        cfg.add_hostnet()
+        if bind_dirs is not None:
+            for bind_mnt in bind_dirs:
+                cfg.add_bind(bind_mnt)
+        cfg_file = FSPath("/var/lib/lxc/%s/config" % (name,))
+        cfg_file.parent_directory.makedirs(sudo=True)
+        with cfg_file.open("w") as cfg_f:
+            cfg_f.write(str(cfg))
+        return cls(name, **attrs)
+
     def start(self, init=None):
         cmd = ["lxc-start", "-n", self.name, "-d", "-l", "info"]
         if init is None:
@@ -227,7 +406,11 @@ class LXC(object):
         if init:
             cmd.append("--")
             cmd.extend(init)
-        return run_command(cmd, as_user="root")
+        try:
+            ret = run_command(cmd, as_user="root")
+        except CommandFailed:
+            __import__("pdb").set_trace()
+        return ret
 
     def run(self, cmd, **args):
         if not self.is_running:
@@ -273,10 +456,12 @@ class SFSFinder(object):
     def __getitem__(self, name):
         for sfs in self.sfs_list:
             if sfs.basename == name and sfs.exists:
+                debug("SFSFinder(regs): %r -> %r", name, sfs.path)
                 return sfs
         sfs = self.search_dirs(name)
         if sfs:
             self.register_sfs(sfs)
+            debug("SFSFinder(dirs): %r -> %r", name, sfs.path)
             return sfs
         raise KeyError("Cannot find SFS", name)
 
@@ -386,14 +571,13 @@ class SFSBuilder(object):
 
     @cached_property
     def lxc(self):
-        lxc = LXC.from_sfs(self.name, self.lxc_parts,
-                           map(lambda d: d.path, [self.lxc_setup_d, self.lxc_rw_d]),
+        lxc = LXC.from_sfs(self.name, self.lxc_parts + map(lambda d: d.path, [self.lxc_setup_d, self.lxc_rw_d]),
                            [
                                LXC.BindEntry(self.dest_dir, self.LXC_DESTDIR),
                                LXC.BindEntry(dl.cache_dir, self.LXC_DL_CACHE),
                                LXC.BindEntry(self.lbu_d, self.LXC_LBU, True),
                            ] + map(lambda (h, l): LXC.BindEntry(h, l), self.deb_mappings),
-                           init_cmd = self.LXC_INIT_CMD)
+                           init_cmd=self.LXC_INIT_CMD, auto_remove=True)
         return lxc
 
     @cached_property
@@ -1159,7 +1343,7 @@ class MountPoint(FSPath):
         if not loop_name.startswith("loop"): raise NotLoopDev("Mountpoint does not seem to be loop device", loop_name)
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
-    def mount_combined(self, parts):
+    def mount_combined(self, parts, **kwargs):
         dirs = []
         for part in parts:
             if isinstance(part, basestring):
@@ -1175,7 +1359,9 @@ class MountPoint(FSPath):
         rw_mount = MountPoint(FSPath(lbu_cache_dir).join("aufs-rw-%s-%s"%(os.getpid(), time.time())))
         rw_mount.mount("aufs-rw", fs_type="tmpfs", mode="0755")
         dirs.append("%s=rw" % (rw_mount.path,))
-        self.mount("aufs-src", dirs=":".join(reversed(dirs)), fs_type="aufs")
+        kwargs.setdefault("fs_type", "aufs")
+        kwargs.setdefault("dirs", ":".join(reversed(dirs)))
+        self.mount("aufs-src", **kwargs)
 
 
 class KVer(object):
@@ -1319,9 +1505,11 @@ class BootDirBuilder(FSPath):
                 src_sfs = SFSFile(src_url)
                 if not dest_sfs.exists or src_sfs.create_stamp > dest_sfs.create_stamp:
                     dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size))
+                sfs_finder.register_sfs(dest_sfs)
                 continue
             if dest_sfs.exists and not dest_sfs.needs_update:
                 info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
+                sfs_finder.register_sfs(dest_sfs)
                 continue
             dest_sfs.rebuild_and_replace(src_url, env=source_list.run_env)
 
@@ -1361,8 +1549,8 @@ class BootDirBuilder(FSPath):
         self.mkrd_rw_d.join("usr/src/make-ramdisk").makedirs(sudo=True)
         self.mkrd_rw_d.join(arch_d.path).makedirs(sudo=True)
         self.arch_dir.makedirs()
-        lxc = LXC.from_sfs("mkrd-build-%d" % (os.getpid(),), ["00-*", "scripts", "settings"],
-                           extra_parts=[self.mkrd_rw_d, self.kernel_sfs.realpath()],
+        lxc = LXC.from_sfs("mkrd-build-%d" % (os.getpid(),), auto_remove=True,
+                           sfs_parts=["00-*", "scripts", "settings", self.mkrd_rw_d, self.kernel_sfs.realpath()],
                            bind_dirs=[LXC.BindEntry(mkrd_git, "usr/src/make-ramdisk", True),
                                       LXC.BindEntry(self.arch_dir.realpath(), arch_d)])
         if "KVERS" not in makeargs:
