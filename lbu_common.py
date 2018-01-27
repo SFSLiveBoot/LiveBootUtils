@@ -1898,3 +1898,33 @@ def locate_sfs(*names):
 @cli_func(desc="Mount combined filesystem from different parts")
 def mount_combined(dest_dir, parts):
     MountPoint(dest_dir).mount_combined(parts.split())
+
+
+@cli_func(desc="Update aufs branch real-time")
+def aufs_update_branch(mnt, aufs="/"):
+    mnt = MountPoint(mnt.rstrip('/'))
+    sfs = SFSFile(mnt.loop_backend)
+    cur_sfs = sfs.curlink_sfs()
+    if cur_sfs.realpath() == sfs.realpath():
+        info("Already up to date: %s", sfs)
+        return
+    info("Updating: %s -> %s", sfs, cur_sfs)
+    aufs_mnt = MountPoint(aufs)
+    comp_match = filter(lambda c: c == mnt, aufs_mnt.aufs_components)
+    if not comp_match:
+        warn("Could not find component path %r in aufs mount %r", mnt.path, aufs_mnt.path)
+        return
+    cur_mnt = cur_sfs.mounted_path
+    if cur_mnt is None:
+        cur_mnt = cur_sfs.mount(auto_remove=False)
+    cur_comp_match = filter(lambda c: c == cur_mnt, aufs_mnt.aufs_components)
+    sfs_mnt = MountPoint(comp_match[0])
+    if cur_comp_match:
+        warn("Updated component already included in AUFS (old: %d, new: %d)",
+             comp_match[0].aufs_index, cur_comp_match[0].aufs_index)
+    else:
+        aufs_mnt.mount("aufs", "remount", "ins:%d:%s=rr" % (sfs_mnt.aufs_index, cur_mnt))
+    aufs_mnt.mount("aufs", "remount", "del:%s" % (sfs_mnt,))
+    sfs_mnt.umount()
+    sfs_mnt.remove_on_delete()
+    return cur_mnt
