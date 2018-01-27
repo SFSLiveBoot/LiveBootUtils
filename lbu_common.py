@@ -1923,7 +1923,7 @@ def aufs_update_branch(mnt, aufs="/"):
         warn("Updated component already included in AUFS (old: %d, new: %d)",
              comp_match[0].aufs_index, cur_comp_match[0].aufs_index)
     else:
-        aufs_mnt.mount("aufs", "remount", "ins:%d:%s=rr" % (sfs_mnt.aufs_index, cur_mnt))
+        aufs_mnt.mount("aufs", "remount", "ins:%d:%s=rr" % (comp_match[0].aufs_index, cur_mnt))
     aufs_mnt.mount("aufs", "remount", "del:%s" % (sfs_mnt,))
     sfs_mnt.umount()
     sfs_mnt.remove_on_delete()
