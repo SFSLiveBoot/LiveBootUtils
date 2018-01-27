@@ -1214,7 +1214,7 @@ class SFSFile(FSPath):
             self.mount()
         return self.mounted_path.open_file(path)
 
-    def mount(self, mountdir=None):
+    def mount(self, mountdir=None, auto_remove=True):
         if mountdir is None:
             mountdir = os.path.join(self.PARTS_DIR, "%02d-%s.%d" % (
                 (lambda x: 99 if x is None else x)(self.basename.prio()),
@@ -1223,8 +1223,9 @@ class SFSFile(FSPath):
                 run_command(['mkdir', '-p', mountdir], as_user='root')
         mnt = MountPoint(mountdir)
         if not mnt.is_mounted:
-            mnt.mount(self.path, "loop", "ro", auto_remove=True)
+            mnt.mount(self.path, "loop", "ro", auto_remove=auto_remove)
         self.mounted_path = mnt
+        return mnt
 
     def rebuild_and_replace(self, source=None, env=None):
         builder = SFSBuilder(self, source)
@@ -1298,6 +1299,9 @@ class MountPoint(FSPath):
         if opts or kwargs:
             cmd.extend(["-o", ",".join(list(opts) + map(lambda k: "%s=%s"%(k, kwargs[k]), kwargs))])
         run_command(cmd, as_user='root')
+
+    def remove_on_delete(self, value=True):
+        self._remove_on_del = value
 
     @property
     def is_mounted(self):
