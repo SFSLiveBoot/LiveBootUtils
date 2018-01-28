@@ -1379,7 +1379,7 @@ class MountPoint(FSPath):
         dirs = []
         for part in parts:
             if isinstance(part, basestring):
-                if os.path.exists(part):
+                if '/' in part and os.path.exists(part):
                     part = FSPath(part)
                 else:
                     part = sfs_finder[part]
