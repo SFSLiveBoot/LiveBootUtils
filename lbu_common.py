@@ -425,18 +425,20 @@ lxc.network.link = %(link)s
             cfg_f.write(str(cfg))
         return cls(name, **attrs)
 
-    def start(self, init=None):
-        cmd = ["lxc-start", "-n", self.name, "-d", "-l", "info"]
+    def start(self, init=None, foreground=False):
+        cmd = ["lxc-start", "-n", self.name, "-F" if foreground else "-d", "-l", "info"]
         if init is None:
             init = self.init_cmd
         if init:
             cmd.append("--")
             cmd.extend(init)
         try:
-            ret = run_command(cmd, as_user="root")
-        except CommandFailed:
-            __import__("pdb").set_trace()
-        return ret
+            return run_command(cmd, as_user="root")
+        except CommandFailed as e:
+            warn("Starting LXC instance %r failed: %r", self.name, e)
+            if sys.stdin.isatty():
+                __import__("pdb").set_trace()
+            raise
 
     def run(self, cmd, **args):
         if not self.is_running:
@@ -1954,3 +1956,9 @@ def aufs_update_branch(mnt, aufs="/"):
     sfs_mnt.umount()
     sfs_mnt.remove_on_delete()
     return cur_mnt
+
+
+@cli_func(desc='Run LXC instance')
+def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts'):
+    lxc = LXC.from_sfs(name, sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
+    lxc.start(foreground=True)
