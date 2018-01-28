@@ -346,6 +346,7 @@ lxc.network.link = %(link)s
                 src, dst, ro = src.src, src.dst, src.ro
             if dst is None:
                 dst = src.lstrip("/")
+            self.extra_parts.append("lxc.hook.pre-mount = /bin/sh -c 'mkdir -p \"$LXC_ROOTFS_PATH/%s\"'" % (dst,))
             self.extra_parts.append(self.MountEntry(src, dst, ro))
 
         def add_hostnet(self):
@@ -1958,7 +1959,17 @@ def aufs_update_branch(mnt, aufs="/"):
     return cur_mnt
 
 
-@cli_func(desc='Run LXC instance')
-def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts'):
-    lxc = LXC.from_sfs(name, sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
+@cli_func(desc='Run LXC instance. bind is space-separated entries of <src_dir>=<dst_dir>[:ro]')
+def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None):
+    args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
+    if bind is not None:
+        args["bind_dirs"] = []
+        for b in bind.split():
+            src, dst = b.split('=', 1)
+            if dst.endswith(':ro'):
+                dst, ro = dst[:-3], True
+            else:
+                ro = False
+            args["bind_dirs"].append(LXC.BindEntry(src, dst, ro))
+    lxc = LXC.from_sfs(name, **args)
     lxc.start(foreground=True)
