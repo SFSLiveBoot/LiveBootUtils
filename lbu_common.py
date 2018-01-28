@@ -82,6 +82,30 @@ def repr_wrap(fn=None, as_str=False):
     return repr_gen
 
 
+def cli_parse_argv(argv):
+    kwargs = {}
+    posargs = []
+    kwarg_name = None
+    for idx, arg in enumerate(argv):
+        if arg.startswith("--"):
+            try:
+                eq_idx = arg.index('=')
+            except ValueError:
+                kwarg_name = arg[2:].replace('-', '_')
+                if kwarg_name == '':
+                    posargs.extend(argv[idx + 1:])
+                    break
+            else:
+                kwarg_name = None
+                kwargs[arg[2:eq_idx].replace('-', '_')] = arg[eq_idx + 1:]
+        elif kwarg_name is not None:
+            kwargs[kwarg_name] = arg
+            kwarg_name = None
+        else:
+            posargs.append(arg)
+    return (posargs, kwargs)
+
+
 def cli_func(func=None, name=None, parse_argv=None, desc=None):
     if func is None:
         def gen(func_real):
@@ -92,13 +116,15 @@ def cli_func(func=None, name=None, parse_argv=None, desc=None):
         return gen
     cli_func.commands[getattr(func, "_cli_name", func.__name__.replace("_", "-"))]=func
     if getattr(func, "_cli_parse_argv", None) is None:
-        func._cli_parse_argv=lambda argv: (argv, {})
+        func._cli_parse_argv=cli_parse_argv
 
     def cli_call(argv):
         try: args, kwargs=func._cli_parse_argv(argv)
         except Exception as e:
             raise BadArgumentsError("bad arguments: %s"%e)
-        try: return func(*args, **kwargs)
+        try:
+            debug("Calling: %s(*%r, **%r)", func.__name__, args, kwargs)
+            return func(*args, **kwargs)
         except TypeError as e:
             if e.message.startswith('%s() '%(func.__name__,)):
                 raise BadArgumentsError(e)
