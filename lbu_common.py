@@ -1857,7 +1857,11 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
             if source_dir=='--auto-rebuild':
                 if dst_sfs.git_source:
                     info("Git repo for %s: %s", dst_sfs.basename, dst_sfs.git_source)
-                if dst_sfs.latest_stamp > dst_sfs.create_stamp:
+                try: latest_stamp = dst_sfs.latest_stamp
+                except Exception as e:
+                    warn("Reading last stamp of %r failed: %r", dst_sfs, e)
+                    continue
+                if latest_stamp > dst_sfs.create_stamp:
                     info("Rebuilding %s: %s > %s", dst_sfs.basename,
                          stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
                     if not no_act:
