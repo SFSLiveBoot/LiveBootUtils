@@ -723,7 +723,7 @@ dl_compile_and_install() {
   if test -x "$src_dir"/configure;then
     (
       cd "$src_dir"
-      CPPFLAGS="-I$prefix/include" LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" ./configure --prefix="$prefix" "$@" $configure_args && make && make install DESTDIR="$inst_dest"
+      CPPFLAGS="-I$prefix/include" LDFLAGS="-Wl,-rpath=$prefix/lib -L$prefix/lib" ./configure --prefix="$prefix" "$@" $configure_args && make $make_flags && make install DESTDIR="$inst_dest"
     ) || return 1
   elif test -e "$src_dir"/setup.py;then
     (
