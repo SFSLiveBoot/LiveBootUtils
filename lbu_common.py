@@ -465,9 +465,12 @@ class SFSFinder(object):
 
     @cached_property
     def _sfs_dirs(self):
-        return dict(map(lambda p: (p, SFSDirectory(p)),
-                        map(lambda e: FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path,
-                            filter(lambda e: e["fs_type"] == "squashfs", global_mountinfo))))
+        if "SFS_FIND_PATH" in os.environ:
+            dirlist = os.environ["SFS_FIND_PATH"].split(":")
+        else:
+            dirlist = map(lambda e: FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path,
+                          filter(lambda e: e["fs_type"] == "squashfs", global_mountinfo))
+        return dict(map(lambda p: (p, SFSDirectory(p)), dirlist))
 
     def search_dirs(self, name, sfs_dirs=None):
         sfs_found = []
