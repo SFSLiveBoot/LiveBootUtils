@@ -546,6 +546,9 @@ class SFSBuilder(object):
     def dest_dir(self):
         dest_dir = MountPoint(self.dest_base.join("destdir"), auto_remove=True)
         if dest_dir.is_mounted: return dest_dir
+        if self.source is None:
+            dest_dir.mount_combined([self.target])
+            return dest_dir
         dest_dir.mount("destdir", fs_type="tmpfs", mode="0755")
         if self.source is not None:
             if not isinstance(self.source, GitRepo):
@@ -637,6 +640,7 @@ class SFSBuilder(object):
                         as_user="root", show_output=True, env=self.run_env)
         if "BUILD_SCRIPT" in self.run_env:
             self.run_in_dest(["sh", "-c", self.run_env["BUILD_SCRIPT"]], show_output=True)
+        script = None
         for script in sorted(self.sfs_src_d.walk(pattern="[0-9][0-9]-*"), key=lambda p: p.basename):
             if not apt_updated:
                 self.run_in_dest(["apt-get", "update"], show_output=True)
@@ -648,6 +652,12 @@ class SFSBuilder(object):
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
                 raise
+        if script is None and self.source is None:
+            warn("No scripts found and no source given. No modifications will happen by default.")
+            if sys.stdin.isatty():
+                info("Modify %s using interactive shell, type 'exit 0' to build and 'exit 1' to cancel." %
+                     (self.LXC_DESTDIR,))
+                self.run_in_dest(["bash", "-i"], show_output=True)
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
