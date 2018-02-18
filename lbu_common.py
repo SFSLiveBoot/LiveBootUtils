@@ -445,10 +445,11 @@ lxc.network.link = %(link)s
         if not self.is_running:
             self.start()
         try: return run_command(["lxc-attach", "-e", "-n", self.name, "--"] + cmd, as_user="root", **args)
-        except CommandFailed:
+        except CommandFailed as e:
+            warn("Command %r failed with %d", cmd, e[1])
+            args.setdefault("show_output", True)
             if "LXC_RUN_FAILSCRIPT" in os.environ:
-                run_command(["sh", "-c", os.environ["LXC_RUN_FAILSCRIPT"], "_fail.sh", self.name] + cmd,
-                            show_output=True, **args)
+                run_command(["sh", "-c", os.environ["LXC_RUN_FAILSCRIPT"], "_fail.sh", self.name] + cmd, **args)
             raise
 
     def shutdown(self):
@@ -642,7 +643,11 @@ class SFSBuilder(object):
                 apt_updated = True
             info("Running %s", script.basename)
             cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
-            self.run_in_dest(cmd, show_output=True)
+            try: self.run_in_dest(cmd, show_output=True)
+            except CommandFailed as e:
+                if sys.stdin.isatty():
+                    self.run_in_dest(["bash", "-i"], show_output=True)
+                raise
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
