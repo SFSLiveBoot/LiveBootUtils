@@ -1462,7 +1462,7 @@ class SourceList(FSPath):
 class BootDirBuilder(FSPath):
     dist_dirname = 'sfs'
     build_targets = set(['efi', 'sfs', 'ramdisk', 'grubconf', 'vmlinuz'])
-    mkrd_src_url = "https://github.com/korc/make-ramdisk.git"
+    mkrd_src_url = "https://github.com/SFSLiveBoot/make-ramdisk.git"
 
     efi_mods = ["configfile", "ext2", "fat"'', "part_gpt", "part_msdos", "normal", "linux", "ls", "boot", "echo",
                 "reboot", "search", "search_fs_file", "search_fs_uuid", "search_label", "help", "ntfs", "ntfscomp",

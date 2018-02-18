@@ -85,7 +85,7 @@ make_ramdisk() {
   }
   local outfile="$2"
   shift 2
-  test -d "$MKRD_D" || git clone git://github.com/korc/make-ramdisk.git "$MKRD_D"
+  test -d "$MKRD_D" || git clone git://github.com/SFSLiveBoot/make-ramdisk.git "$MKRD_D"
   make -C "$MKRD_D" RAMDISK="$outfile" "$@"
 }
 
