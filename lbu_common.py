@@ -1433,8 +1433,9 @@ class KVer(object):
 
 
 class SourceList(FSPath):
-    source_url = None
+    base_url = None
     kernel_fn_re = re.compile(r'.*?(?P<arch>x86_64|i[3-6]86)/(?:[0-9][0-9]-)?kernel-(?P<kver>[0-9]+\.[0-9].*)\.sfs$')
+    url_re = re.compile(r'^[a-z+]+://', re.I)
 
     @cached_property
     def run_env(self):
@@ -1444,23 +1445,29 @@ class SourceList(FSPath):
         src = self if self.exists else dl.dl_file(self.path)
         for line in src.open():
             words = line.strip().split()
+            # comments or empty lines
             if not words or line.startswith("#"):
                 continue
+
+            # environment definition
             if '=' in words[0]:
                 env_k, env_v = line.strip().split('=', 1)
                 self.run_env[env_k] = env_v
                 continue
-            if len(words) > 1:
-                sfs_name, sfs_source_url = words
+
+            if len(words) < 2:  # source is exactly same string as target
+                sfs_name, sfs_source_url = words[0], words[0]
             else:
-                sfs_name = words[0]
-                if self.source_url is None:
-                    sfs_source_url = None
-                else:
-                    sfs_source_url = os.path.join(self.source_url, sfs_name)
+                sfs_name, sfs_source_url = words[:2]
+            # combine with base url if source url is not an URL
+            if self.base_url and not self.url_re.match(sfs_source_url):
+                sfs_source_url = os.path.join(self.base_url, sfs_source_url)
+
+            # define "base" url
             if sfs_name == '*':
-                self.source_url = sfs_source_url
+                self.base_url = None if sfs_source_url == '*' else sfs_source_url
                 continue
+
             kernel_m = self.kernel_fn_re.match(sfs_name)
             if kernel_m:
                 self.kernel_sfs = sfs_name
