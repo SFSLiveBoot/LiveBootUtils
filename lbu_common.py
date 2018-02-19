@@ -786,6 +786,15 @@ class FSPath(object):
         raise RuntimeError("Cannot determine backend of file", self.path)
 
     @cached_property
+    def aufs_original(self):
+        if not self.mountpoint.fs_type == 'aufs':
+            raise NotAufs('Not located at aufs mountpoint')
+        for aufs_part in self.mountpoint.aufs_components:
+            test_file = aufs_part.join(self.realpath().path)
+            if test_file.exists:
+                return test_file
+
+    @cached_property
     def parent_directory(self):
         return FSPath(self._parent_path)
 
@@ -929,6 +938,8 @@ class FSPath(object):
 
     @property
     def loop_dev(self):
+        try: alt_path = self.aufs_original.path
+        except NotAufs: alt_path = self.path
         for devname in os.listdir('/sys/block'):
             if not devname.startswith('loop'):
                 continue
@@ -937,7 +948,7 @@ class FSPath(object):
                 continue
             if not os.path.exists(bfile):
                 continue
-            if not os.path.samefile(bfile, self.path):
+            if not os.path.samefile(bfile, self.path) and not os.path.samefile(bfile, alt_path):
                 continue
             if not int(open('/sys/block/%s/loop/offset'%(devname,)).read().strip())==0:
                 continue
@@ -1270,7 +1281,11 @@ class SFSFile(FSPath):
                 run_command(['mkdir', '-p', mountdir], as_user='root')
         mnt = MountPoint(mountdir)
         if not mnt.is_mounted:
-            mnt.mount(self.path, "loop", "ro", auto_remove=auto_remove)
+            try:
+                path = self.aufs_original.path
+            except NotAufs:
+                path = self.path
+            mnt.mount(path, "loop", "ro", auto_remove=auto_remove)
         self.mounted_path = mnt
         return mnt
 
