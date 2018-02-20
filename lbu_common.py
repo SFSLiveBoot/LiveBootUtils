@@ -415,7 +415,7 @@ lxc.network.link = %(link)s
             if isinstance(part, SFSFile):
                 if part.mounted_path is None:
                     part.mount()
-        cfg = LXC.Config(name, sfs_parts=" ".join(map(str, all_parts)))
+        cfg = LXC.Config(name, sfs_parts=" ".join(map(lambda p: p.realpath().path, all_parts)))
         cfg.add_hostnet()
         if bind_dirs is not None:
             for bind_mnt in bind_dirs:
