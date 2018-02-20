@@ -408,9 +408,25 @@ lxc.network.link = %(link)s
 
     @classmethod
     def from_sfs(cls, name, sfs_parts, bind_dirs=None, **attrs):
-        all_parts = attrs["all_parts"] = map(
-            lambda s: s if isinstance(s, FSPath) else FSPath(s) if FSPath(s).exists else sfs_finder[s],
-            sfs_parts)
+        all_parts = attrs["all_parts"] = []
+        for part in sfs_parts:
+            if isinstance(part, FSPath):
+                all_parts.append(part)
+            elif FSPath(part).exists:
+                all_parts.append(FSPath(part))
+            else:
+                found_part = None
+                for part_s in part.split(','):
+                    try:
+                        found_part = sfs_finder[part_s]
+                    except KeyError:
+                        pass
+                    else:
+                        break
+                if found_part is None:
+                    raise KeyError("Cannot find LXC part %r" % (part,))
+                all_parts.append(found_part)
+
         for part in all_parts:
             if isinstance(part, SFSFile):
                 if part.mounted_path is None:
