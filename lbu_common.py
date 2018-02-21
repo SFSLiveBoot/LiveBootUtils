@@ -654,9 +654,9 @@ class SFSBuilder(object):
         if "PRE_BUILD_SCRIPT" in self.run_env:
             run_command(["sh", "-c", self.run_env["PRE_BUILD_SCRIPT"], "_build.sh", self.dest_dir.path, self.lxc.name],
                         as_user="root", show_output=True, env=self.run_env)
+        script = self.run_env.get("BUILD_SCRIPT")
         if "BUILD_SCRIPT" in self.run_env:
             self.run_in_dest(["sh", "-c", self.run_env["BUILD_SCRIPT"]], show_output=True)
-        script = None
         for script in sorted(self.sfs_src_d.walk(pattern="[0-9][0-9]-*"), key=lambda p: p.basename):
             if not apt_updated:
                 self.run_in_dest(["apt-get", "update"], show_output=True)
@@ -668,6 +668,9 @@ class SFSBuilder(object):
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
                 raise
+        if "LAST_BUILD_SCRIPT" in self.run_env:
+            script = self.run_env.get("LAST_BUILD_SCRIPT")
+            self.run_in_dest(["sh", "-c", self.run_env["LAST_BUILD_SCRIPT"]], show_output=True)
         if script is None and self.source is None:
             warn("No scripts found and no source given. No modifications will happen by default.")
             if sys.stdin.isatty():
@@ -1832,7 +1835,7 @@ def sfs_stamp(src):
     else: return sfs_stamp_file(src)
 
 
-@cli_func(desc="Rebuild a SFS file, optionally from specified source")
+@cli_func(desc="Rebuild a SFS file. Recognizes {PRE_,LAST_,}BUILD_SCRIPT vars.")
 def rebuild_sfs(target, source=None, *env_vars):
     sfs = SFSFile(target)
     if source=="": source=None
