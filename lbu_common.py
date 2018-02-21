@@ -1356,10 +1356,13 @@ class MountPoint(FSPath):
             super(MountPoint, self).__del__()
 
     @cached_property
-    def fs_type(self): return self._find_mount_tab_entry().fs_type
+    def fs_type(self): return self.mountinfo['fs_type']
 
     @cached_property
-    def mount_source(self): return self._find_mount_tab_entry().mount_source
+    def mount_source(self): return self.mountinfo['dev']
+
+    @cached_property
+    def mount_options(self): return self.mountinfo['opts']
 
     def umount(self):
         if not self.exists or not self.is_mounted:
@@ -1388,24 +1391,22 @@ class MountPoint(FSPath):
     @property
     def is_mounted(self):
         if not self.exists: return False
-        for e in global_mountinfo:
-            try: is_same = os.path.samefile(e["mnt"], self.path)
-            except OSError: continue
-            if is_same: return True
-        return False
+        try: del self.mountinfo
+        except AttributeError: pass
+        return self.mountinfo is not None
 
-    def _find_mount_tab_entry(self):
-        if _mount_tab is None: _load_mount_tab()
-        for mount_tab_entry in _mount_tab:
-            mount_tab_path=mount_tab_entry[1].replace("\\040", " ")
-            if mount_tab_path == self.path:
-                self.mount_source, path, self.fs_type, self.mount_options=mount_tab_entry[:4]
-                return self
-        raise RuntimeError("Cannot find mountpoint entry", self.path)
+    @cached_property
+    def mountinfo(self):
+        for e in global_mountinfo:
+            try:
+                if os.path.samefile(e["mnt"], self.path):
+                    return e
+            except OSError:
+                continue
 
     @cached_property
     def aufs_si(self):
-        return filter(lambda x: x.startswith("si="), self.mount_options.split(","))[0].split("=")[1]
+        return filter(lambda x: x.startswith("si="), self.mount_options)[0].split("=")[1]
 
     @cached_property
     def aufs_components(self):
