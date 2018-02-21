@@ -1087,18 +1087,19 @@ class Downloader(object):
 
         if source[:4] == 'git+':
             source = source[4:]
+        git_env = dict(map(lambda n: (n, os.environ[n]), filter(lambda n: n in os.environ, ('SSH_AUTH_SOCK',))))
         if os.path.exists(dest_path):
             cmd = ['git', 'pull', '--recurse-submodules', source]
             if git_branch: cmd += [git_branch]
-            run_command(cmd, cwd=dest_path)
+            run_command(cmd, cwd=dest_path, env=git_env)
             if os.path.exists(os.path.join(dest_path, '.gitmodules')):
-                run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest_path)
+                run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest_path, env=git_env)
             return GitRepo(dest_path)
         else:
             cmd = ['git', 'clone', '--recurse-submodules']
             if git_branch: cmd += ['-b', git_branch]
             cmd += ['--depth=1', source, dest_path]
-            run_command(cmd)
+            run_command(cmd, env=git_env)
             return GitRepo(dest_path)
 
     def dl_file_url(self, source, dest_path):
