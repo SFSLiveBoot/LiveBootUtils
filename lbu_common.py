@@ -1091,7 +1091,10 @@ class Downloader(object):
         if os.path.exists(dest_path):
             cmd = ['git', 'pull', '--recurse-submodules', source]
             if git_branch: cmd += [git_branch]
-            run_command(cmd, cwd=dest_path, env=git_env)
+            try: run_command(cmd, cwd=dest_path, env=git_env)
+            except CommandFailed as e:
+                warn("Update failed, will use old cache for %r. Error message: %r", dest_path, e[2])
+                return GitRepo(dest_path)
             if os.path.exists(os.path.join(dest_path, '.gitmodules')):
                 run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest_path, env=git_env)
             return GitRepo(dest_path)
