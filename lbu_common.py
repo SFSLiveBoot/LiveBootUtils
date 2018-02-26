@@ -1429,7 +1429,10 @@ class MountPoint(FSPath):
 
     @cached_property
     def loop_backend(self):
-        loop_name=self.mount_source.split(os.path.sep)[-1]
+        source = self.mount_source
+        if source is None:
+            raise NotLoopDev("No source device registered")
+        loop_name=source.split(os.path.sep)[-1]
         if not loop_name.startswith("loop"): raise NotLoopDev("Mountpoint does not seem to be loop device", loop_name)
         return open(os.path.join("/sys/block", loop_name, "loop/backing_file")).read().rstrip("\n")
 
