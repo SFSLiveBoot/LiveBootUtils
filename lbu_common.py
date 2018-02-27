@@ -495,7 +495,7 @@ class SFSFinder(object):
             sfs_dirs = self._sfs_dirs.values()
         for sfs_dir in sfs_dirs:
             sfs_found.extend(map(lambda sfs: sfs.curlink_sfs(), sfs_dir.find_all_sfs(name)))
-        sfs_found.sort(key=lambda sfs: sfs.create_stamp)
+        sfs_found.sort(key=lambda sfs: -sfs.create_stamp)
         if sfs_found:
             return sfs_found[0]
 
