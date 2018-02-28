@@ -588,6 +588,7 @@ class SFSBuilder(object):
         paths = [self.LXC_LBU, self.LXC_DL_CACHE, self.LXC_DESTDIR]
         paths.extend(map(lambda (h, l): l.lstrip("/"), self.deb_mappings))
         run_command(["mkdir", "-p"] + map(lambda sd: d.join(sd).path, paths), as_user="root")
+        run_command(["cp", "--parents", "/etc/resolv.conf", d.path], as_user="root")
         return d
 
     @cached_property
