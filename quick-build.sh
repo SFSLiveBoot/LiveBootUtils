@@ -16,7 +16,7 @@ set -e
 
 test -n "$SUDO" -o "x$(id -u)" = "x0" || SUDO="sudo"
 run() {
-  echo "Running:$(for a;do echo -n " '$a'";done)" >&2
+  echo "Running:$(for a;do case "$a" in *[^A-Za-z0-9_./=:-]*|"") echo -n " '$a'";;*) echo -n " $a";;esac;done)" >&2
   "$@"
 }
 
