@@ -6,8 +6,8 @@ set -e
 : "${kver:=4.15.4}"
 : "${dist:=stretch}"
 
-: "${bootstrap_d:=bootstrap.d}"
-: "${build_d:=SFSLiveBoot-build.d}"
+: "${bootstrap_d:=$(readlink -f "bootstrap.d")}"
+: "${build_d:=$(readlink -f "SFSLiveBoot-build.d")}"
 : "${build_lst:=$bootstrap_d/build.lst}"
 : "${lbu:=$(dirname "$0")}"
 : "${bootstrap_files:=$repo_base/00-root-sfs/releases/download/20180122/00-$dist-min.sfs $repo_base/15-settings-sfs/releases/download/20180122/15-settings.sfs $repo_base/20-scripts-sfs/releases/download/20180122/20-scripts.sfs}"
@@ -83,10 +83,10 @@ fi
 echo -n "Testing for grub: "
 if test -d "$efi_dir" && which grub-mkrescue >/dev/null && which xorriso >/dev/null && which mcopy >/dev/null;then
   echo "ok."
-  output_iso="SFSLiveBoot.iso"
+  output_iso="$(readlink -f "SFSLiveBoot.iso")"
 else
   if run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install grub-efi-amd64-bin grub-common xorriso mtools;then
-    $output_iso="SFSLiveBoot.iso"
+    output_iso="$(readlink -f "SFSLiveBoot.iso")"
   else
     echo "failed, skipping ISO build"
   fi
@@ -108,4 +108,5 @@ x86_64/10-kernel-${kver}.sfs    10-kernel-srcbuild-sfs/releases/download/v${kver
 EOF
 echo "ok."
 
-run $SUDO env SFS_FIND_PATH="$(readlink -f "$bootstrap_d")" $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux $output_iso
+run cd "$bootstrap_d"
+run $SUDO env SFS_FIND_PATH="$bootstrap_d" $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux "$output_iso"
