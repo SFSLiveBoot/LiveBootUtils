@@ -97,8 +97,11 @@ run mkdir -p "$bootstrap_d"
 (cd "$bootstrap_d"; run wget -c $bootstrap_files)
 echo "ok."
 
-echo -n "Creating ${build_lst}.. "
-cat >"$build_lst" <<EOF
+if test -s "$build_lst";then
+  echo "Using already existing $build_lst"
+else
+  echo -n "Creating ${build_lst}.. "
+  cat >"$build_lst" <<EOF
 * $repo_base
 00-$dist-gnome.sfs              00-root-sfs.git#$dist
 15-settings.sfs                 15-settings-sfs.git
@@ -106,7 +109,8 @@ cat >"$build_lst" <<EOF
 40-user.sfs                     40-user-sfs.git
 x86_64/10-kernel-${kver}.sfs    10-kernel-srcbuild-sfs/releases/download/v${kver}-1/10-kernel-${kver}.sfs
 EOF
-echo "ok."
+  echo "ok."
+fi
 
 run cd "$bootstrap_d"
 run $SUDO env SFS_FIND_PATH="$bootstrap_d" $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux "$output_iso"
