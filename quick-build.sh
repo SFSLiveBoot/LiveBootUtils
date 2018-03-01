@@ -37,7 +37,7 @@ echo -n "Testing for git: "
 if which git >/dev/null;then
   echo "ok."
 else
-  run $SUDO apt-get install git
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install git
 fi
 
 echo -n "Testing for LiveBootUtils: "
@@ -53,7 +53,7 @@ echo -n "Testing for python: "
 if PYTHON=$(which python2);then
   $PYTHON -V
 else
-  run $SUDO apt-get install python python-crypto
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install python python-crypto
   PYTHON="$(which python2)"
 fi
 
@@ -65,19 +65,19 @@ else
     Ubuntu) lxc_pkg=lxc1;;
     *) lxc_pkg=lxc;;
   esac
-  run $SUDO apt-get install $lxc_pkg
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install $lxc_pkg
 fi
 
 echo -n "Testing mksquashfs: "
 which mksquashfs || {
-  run $SUDO apt-get install squashfs-tools
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install squashfs-tools
 }
 
 echo -n "Testing for wget: "
 if which wget >/dev/null;then
   echo "ok."
 else
-  run $SUDO apt-get install wget
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install wget
 fi
 
 echo -n "Testing for grub: "
@@ -85,7 +85,7 @@ if test -d "$efi_dir" && which grub-mkrescue >/dev/null && which xorriso >/dev/n
   echo "ok."
   output_iso="SFSLiveBoot.iso"
 else
-  if run $SUDO apt-get install grub-efi-amd64-bin grub-common xorriso mtools;then
+  if run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install grub-efi-amd64-bin grub-common xorriso mtools;then
     $output_iso="SFSLiveBoot.iso"
   else
     echo "failed, skipping ISO build"
