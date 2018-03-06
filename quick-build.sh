@@ -48,6 +48,10 @@ else
     run git clone --depth=1 $repo_base/LiveBootUtils
   lbu="$(readlink -f "LiveBootUtils")"
 fi
+if test -d "$lbu/.git";then
+  echo -n "Updating LiveBootUtils.."
+  (cd "$lbu"; run git pull)
+fi
 
 echo -n "Testing for python: "
 if PYTHON=$(which python2);then
