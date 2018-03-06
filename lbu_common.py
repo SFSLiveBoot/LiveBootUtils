@@ -675,9 +675,9 @@ class SFSBuilder(object):
         if script is None and self.source is None:
             warn("No scripts found and no source given. No modifications will happen by default.")
             if sys.stdin.isatty():
-                info("Modify %s using interactive shell, type 'exit 0' to build and 'exit 1' to cancel." %
-                     (self.LXC_DESTDIR,))
-                self.run_in_dest(["bash", "-i"], show_output=True)
+                info("Modify $DESTDIR using interactive shell, type 'exit 0' to build and 'exit 1' to cancel.")
+                run_command(["bash", "-i"], cwd=self.dest_dir.path, show_output=True,
+                            env=dict(self.run_env, DESTDIR=self.dest_dir.path))
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
