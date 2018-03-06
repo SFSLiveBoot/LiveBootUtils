@@ -636,6 +636,7 @@ class SFSBuilder(object):
     @cached_property
     def run_env(self):
         return dict(
+            dl.proxy_env,
             TERM=os.environ.get("TERM", "linux"),
             COLUMNS=os.environ.get("COLUMNS", "80"), LINES=os.environ.get("LINES", "25"),
             DESTDIR=self.LXC_DESTDIR,
@@ -1070,6 +1071,13 @@ class Downloader(object):
     http_read_size = 8192
     http_time_format = "%a, %d %b %Y %H:%M:%S GMT"
 
+    _env_proxy_vars = " ".join(filter(lambda n: n.lower().endswith('_proxy'), os.environ.keys()))
+    pass_host_env = os.environ.get("DL_PROXY_ENV_VARS", _env_proxy_vars).split()
+
+    @cached_property
+    def proxy_env(self):
+        return dict(map(lambda n: (n, os.environ[n]), filter(lambda n: n in os.environ, self.pass_host_env)))
+
     @cached_property
     def cache_dir(self):
         cache_dir = os.environ.get("dl_cache_dir", os.path.join(lbu_cache_dir, "dl"))
@@ -1088,7 +1096,9 @@ class Downloader(object):
 
         if source[:4] == 'git+':
             source = source[4:]
-        git_env = dict(map(lambda n: (n, os.environ[n]), filter(lambda n: n in os.environ, ('SSH_AUTH_SOCK',))))
+        git_env = dict(self.proxy_env)
+        if "SSH_AUTH_SOCK" in os.environ:
+            git_env["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
         if os.path.exists(dest_path):
             cmd = ['git', 'pull', '--recurse-submodules', source]
             if git_branch: cmd += [git_branch]
@@ -1286,7 +1296,7 @@ class SFSFile(FSPath):
             self.mount()
         try:
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
-                        show_output=True, env=dict(DESTDIR=self.mounted_path.path))
+                        show_output=True, env=dict(dl.proxy_env, DESTDIR=self.mounted_path.path))
         except CommandFailed as e:
             return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp

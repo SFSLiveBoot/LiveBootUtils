@@ -463,7 +463,7 @@ enter_chroot() {
 
   while true;do
     retval=0
-    as_root ${unshare:+unshare $unshare -- } env - debian_chroot="${debian_chroot:-${dst##*/}}" TERM="$TERM" PATH="/sbin:/usr/sbin:$PATH" HOME=/root DISPLAY="$DISPLAY" chroot "$dst" "$@" || retval=1
+    as_root ${unshare:+unshare $unshare -- } env - $(env | grep -i '^[^=]*_proxy=') debian_chroot="${debian_chroot:-${dst##*/}}" TERM="$TERM" PATH="/sbin:/usr/sbin:$PATH" HOME=/root DISPLAY="$DISPLAY" chroot "$dst" "$@" || retval=1
     lsof_out="$(as_root lsof -w +d "$dst" || true)"
     test -n "$lsof_out" || break
     echo "$lsof_out" >&2
