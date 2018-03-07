@@ -1295,8 +1295,9 @@ class SFSFile(FSPath):
         if self.mounted_path == None:
             self.mount()
         try:
+            run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir)
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
-                        show_output=True, env=dict(dl.proxy_env, DESTDIR=self.mounted_path.path))
+                        show_output=True, env=run_env)
         except CommandFailed as e:
             return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
