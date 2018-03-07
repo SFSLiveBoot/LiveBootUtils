@@ -1919,7 +1919,11 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
     if not target_dirs: target_dirs=(SFSDirectoryAufs(), )
     for target_dir in target_dirs:
         last_dir=None
-        for sfs in target_dir.all_sfs:
+        target_dir_all_sfs = target_dir.all_sfs
+        # make sure more basic lower-level SFS files (like 00-*) get rebuilt first
+        if isinstance(target_dir, SFSDirectoryAufs):
+            target_dir_all_sfs = reversed(target_dir_all_sfs)
+        for sfs in target_dir_all_sfs:
             if not sfs.parent_directory == last_dir:
                 last_dir=sfs.parent_directory
                 info("Processing directory: %s", last_dir)
