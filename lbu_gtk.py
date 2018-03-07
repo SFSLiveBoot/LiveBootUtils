@@ -9,25 +9,6 @@ from gi.repository import Gtk, GLib
 from logging import warn
 
 
-def branch2store(branch):
-    ret = dict(mnt=branch.path)
-    ret['icon-name'] = 'folder'
-    mpt = branch.mountpoint
-    if mpt == branch:
-        try:
-            backend = lbu_common.FSPath(mpt.loop_backend)
-        except lbu_common.NotLoopDev:
-            pass
-        else:
-            ret['file'] = backend
-            ret['file-path'] = backend.path
-            if isinstance(backend, lbu_common.SFSFile):
-                ret['icon-name'] = 'package-x-generic'
-            else:
-                ret['icon-name'] = 'drive-harddisk'
-    return ret
-
-
 class AppWindow(Gtk.ApplicationWindow):
     sfs_store_cols = [('file', object), ('file-path', str), ('mnt', str), ('stamp', str), ('icon-name', str),
                       ('need-update', bool), ('update-reason', str), ('update-icon', str),
@@ -104,12 +85,20 @@ class AppWindow(Gtk.ApplicationWindow):
         row = self.sfs_store[store_path]
         row[self.store_col_idx('update-reason')] = 'Checking..'
         sfs = row[self.store_col_idx('file')]
-        if sfs.needs_update:
-            row[self.store_col_idx('update-icon')] = 'software-update-available'
-            row[self.store_col_idx('update-reason')] = "Latest stamp: %r" % (lbu_common.stamp2txt(sfs.latest_stamp, ))
+        try:
+            need_update = sfs.needs_update
+        except Exception as e:
+            row[self.store_col_idx('update-icon')] = 'network-error'
+            row[self.store_col_idx('update-reason')] = "Check failed: %s: %s" % (e.__class__.__name__, e,)
+            warn("Error during updating %r: %s", sfs, e)
         else:
-            row[self.store_col_idx('update-icon')] = 'gtk-apply'
-            row[self.store_col_idx('update-reason')] = 'Up to date.'
+            if need_update:
+                row[self.store_col_idx('update-icon')] = 'software-update-available'
+                row[self.store_col_idx('update-reason')] = "Latest stamp: %r" % (
+                    lbu_common.stamp2txt(sfs.latest_stamp, ))
+            else:
+                row[self.store_col_idx('update-icon')] = 'gtk-apply'
+                row[self.store_col_idx('update-reason')] = 'Up to date.'
 
 
 class Application(Gtk.Application):
@@ -143,9 +132,25 @@ class Application(Gtk.Application):
         self.more_to_check = []
 
         for branch in lbu_common.MountPoint('/').aufs_components:
-            data = branch2store(branch)
+            data = {"mnt": branch.path, "icon-name": "folder"}
+            mpt = branch.mountpoint
+            check_more = False
+            if mpt == branch:
+                try:
+                    backend = lbu_common.FSPath(mpt.loop_backend)
+                except lbu_common.NotLoopDev:
+                    pass
+                else:
+                    data['file'] = backend
+                    data['file-path'] = backend.path
+                    if isinstance(backend, lbu_common.SFSFile):
+                        data['icon-name'] = 'package-x-generic'
+                        check_more = True
+                    else:
+                        data['icon-name'] = 'drive-harddisk'
+
             store_path = self.window.sfs_store_append(**data)
-            if isinstance(data.get('file'), lbu_common.SFSFile):
+            if check_more:
                 self.more_to_check.append((self.window.do_sfs_check, store_path))
 
         if self.more_to_check:
