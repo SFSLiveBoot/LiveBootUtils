@@ -1295,7 +1295,8 @@ class SFSFile(FSPath):
         if self.mounted_path == None:
             self.mount()
         try:
-            run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir)
+            run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir,
+                           lbu=FSPath(__file__).parent_directory.path)
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
                         show_output=True, env=run_env)
         except CommandFailed as e:
