@@ -763,7 +763,9 @@ class FSPath(object):
     _remove_on_del = False
 
     def __new__(cls, path, **attrs):
-        if cls==FSPath and path.rstrip(".0123456789").endswith('.sfs'):
+        path_str = (path.path if isinstance(path, FSPath) else path if isinstance(path, basestring) else str(path))
+        path_str = path_str.rstrip('.0123456789')
+        if cls == FSPath and (path_str.endswith('.sfs') or path_str.endswith('.sfs.OLD')):
             cls=SFSFile
         if isinstance(path, basestring) and (path.startswith('http://') or path.startswith('https://')):
             cls = type('%s_url' % (cls.__name__,), (cls,), dict(
