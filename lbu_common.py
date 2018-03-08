@@ -1653,7 +1653,9 @@ class BootDirBuilder(FSPath):
         info("Building EFI image (%s)", self.efi_arch)
         efi_img = self.join("EFI", "Boot", "bootx64.efi")
         efi_img.parent_directory.makedirs()
-        run_command(["install", "-D", "-t", self.join("boot/grub", self.efi_arch).path] +
+        efi_modpath = self.join("boot/grub", self.efi_arch)
+        efi_modpath.makedirs()
+        run_command(["install", "-D", "-t", efi_modpath.path] +
                     map(lambda n: n.path, self.efi_src_d.walk()))
         run_command(["grub-mkimage", "-o", efi_img.path, "-O", self.efi_arch, "-p", "boot/grub"] + self.efi_mods)
 

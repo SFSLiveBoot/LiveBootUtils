@@ -16,7 +16,7 @@ set -e
 
 test -n "$SUDO" -o "x$(id -u)" = "x0" || SUDO="sudo"
 run() {
-  echo "Running:$(for a;do case "$a" in *[^A-Za-z0-9_./=:-]*|"") echo -n " '$a'";;*) echo -n " $a";;esac;done)" >&2
+  echo "Running:$(for a in "$@";do case "$a" in *[^A-Za-z0-9_./=:-]*|"") echo -n " '$a'";;*) echo -n " $a";;esac;done)" >&2
   "$@"
 }
 
@@ -66,10 +66,14 @@ if which lxc-start >/dev/null;then
   lxc-info --version
 else
   case "$(lsb_release -is)" in
-    Ubuntu) lxc_pkg=lxc1;;
+    Ubuntu)
+      case "$(lsb_release -rs)" in
+        14.*) lxc_pkg=lxc lxc_repo=trusty-backports;;
+        *) lxc_pkg=lxc1;;
+      esac;;
     *) lxc_pkg=lxc;;
   esac
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install $lxc_pkg
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get ${lxc_repo:+-t $lxc_repo} -y install $lxc_pkg
 fi
 
 echo -n "Testing mksquashfs: "
