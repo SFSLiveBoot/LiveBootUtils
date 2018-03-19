@@ -1547,16 +1547,30 @@ class BootDirBuilder(FSPath):
     kernel_append = None
     serial_console = None
 
+    LXC_DEST_ARCH = "/destdir/arch"
+    LXC_MKRD_DIR = "/usr/src/make-ramdisk"
     @cached_property
     def source_list(self):
         return SourceList(self.source_list_url)
 
     @cached_property
-    def mkrd_rw_d(self):
-        d = MountPoint(os.path.join(lbu_cache_dir, "mkrd-rw-%d" % (os.getpid(),)), auto_remove=True)
+    def lxc_buildconf_d(self):
+        d = MountPoint(os.path.join(lbu_cache_dir, "builder-lxc-conf-%d" % (os.getpid(),)), auto_remove=True)
         if not d.is_mounted:
             d.mount("mkrd-rw", fs_type="tmpfs", mode="0755")
         return d
+
+    @cached_property
+    def build_lxc(self):
+        mkrd_git_dir = dl.dl_file(self.mkrd_src_url)
+        self.lxc_buildconf_d.join(self.LXC_MKRD_DIR).makedirs(sudo=True)
+        self.lxc_buildconf_d.join(self.LXC_DEST_ARCH).makedirs(sudo=True)
+        bind_dirs = [LXC.BindEntry(mkrd_git_dir, self.LXC_MKRD_DIR, True),
+                     LXC.BindEntry(self.arch_dir.realpath(), self.LXC_DEST_ARCH)]
+        lxc = LXC.from_sfs("builddir-%d" % (os.getpid(),), auto_remove=True,
+                           sfs_parts=["00-*", "scripts", "settings", self.lxc_buildconf_d, self.kernel_sfs.realpath()],
+                           bind_dirs=bind_dirs)
+        return lxc
 
     @cached_property
     def kernel_sfs(self):
@@ -1661,21 +1675,13 @@ class BootDirBuilder(FSPath):
 
     def build_ramdisk(self, **makeargs):
         info("Building ramdisk-%s", self.kver)
-        mkrd_git = dl.dl_file(self.mkrd_src_url)
-        arch_d = FSPath("usr/src/build/arch")
-        self.mkrd_rw_d.join("usr/src/make-ramdisk").makedirs(sudo=True)
-        self.mkrd_rw_d.join(arch_d.path).makedirs(sudo=True)
-        self.arch_dir.makedirs()
-        lxc = LXC.from_sfs("mkrd-build-%d" % (os.getpid(),), auto_remove=True,
-                           sfs_parts=["00-*", "scripts", "settings", self.mkrd_rw_d, self.kernel_sfs.realpath()],
-                           bind_dirs=[LXC.BindEntry(mkrd_git, "usr/src/make-ramdisk", True),
-                                      LXC.BindEntry(self.arch_dir.realpath(), arch_d)])
         if "KVERS" not in makeargs:
             makeargs["KVERS"] = self.kver
         if "RAMDISK_DESTDIR" not in makeargs:
-            makeargs["RAMDISK_DESTDIR"] = "/%s/" % (arch_d,)
-        cmd = ["make", "-C", "/usr/src/make-ramdisk"] + map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
-        lxc.run(cmd, env=self.run_env)
+            makeargs["RAMDISK_DESTDIR"] = "%s/" % (self.LXC_DEST_ARCH,)
+        self.arch_dir.makedirs()
+        cmd = ["make", "-C", self.LXC_MKRD_DIR] + map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
+        self.build_lxc.run(cmd, env=self.run_env)
 
 
 @cli_func(desc="List AUFS original components")
