@@ -10,9 +10,8 @@ set -e
 : "${build_d:=$(readlink -f "SFSLiveBoot-build.d")}"
 : "${build_lst:=$bootstrap_d/build.lst}"
 : "${lbu:=$(dirname "$0")}"
+: "${output_iso:=$(readlink -f "SFSLiveBoot.iso")}"
 : "${bootstrap_files:=$repo_base/00-root-sfs/releases/download/20180122/00-$dist-min.sfs $repo_base/15-settings-sfs/releases/download/20180122/15-settings.sfs $repo_base/20-scripts-sfs/releases/download/20180122/20-scripts.sfs}"
-
-: "${efi_dir:=/usr/lib/grub/x86_64-efi}"
 
 test -n "$SUDO" -o "x$(id -u)" = "x0" || SUDO="sudo"
 run() {
@@ -86,18 +85,6 @@ if which wget >/dev/null;then
   echo "ok."
 else
   run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install wget
-fi
-
-echo -n "Testing for grub: "
-if test -d "$efi_dir" && which grub-mkrescue >/dev/null && which xorriso >/dev/null && which mcopy >/dev/null;then
-  echo "ok."
-  output_iso="$(readlink -f "SFSLiveBoot.iso")"
-else
-  if run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install grub-efi-amd64-bin grub-common xorriso mtools;then
-    output_iso="$(readlink -f "SFSLiveBoot.iso")"
-  else
-    echo "failed, skipping ISO build"
-  fi
 fi
 
 echo -n "Downloading bootstrap files.. "
