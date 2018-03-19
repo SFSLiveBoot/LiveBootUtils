@@ -1542,13 +1542,15 @@ class BootDirBuilder(FSPath):
                 "reboot", "search", "search_fs_file", "search_fs_uuid", "search_label", "help", "ntfs", "ntfscomp",
                 "hfsplus", "chain", "multiboot", "terminal", "lspci", "font", "efi_gop", "efi_uga", "gfxterm"]
     efi_arch = "x86_64-efi"
-    efi_src_d = FSPath("/usr/lib/grub").join(efi_arch)
     iso_output = None
     kernel_append = None
     serial_console = None
 
     LXC_DEST_ARCH = "/destdir/arch"
     LXC_MKRD_DIR = "/usr/src/make-ramdisk"
+    LXC_DEST_BOOTDIR = "/destdir/bootdir"
+    LXC_DEST_ISO_PARENT = "/destdir/iso-parent"
+
     @cached_property
     def source_list(self):
         return SourceList(self.source_list_url)
@@ -1564,9 +1566,15 @@ class BootDirBuilder(FSPath):
     def build_lxc(self):
         mkrd_git_dir = dl.dl_file(self.mkrd_src_url)
         self.lxc_buildconf_d.join(self.LXC_MKRD_DIR).makedirs(sudo=True)
+        self.lxc_buildconf_d.join(self.LXC_DEST_BOOTDIR).makedirs(sudo=True)
         self.lxc_buildconf_d.join(self.LXC_DEST_ARCH).makedirs(sudo=True)
         bind_dirs = [LXC.BindEntry(mkrd_git_dir, self.LXC_MKRD_DIR, True),
+                     LXC.BindEntry(self.realpath(), self.LXC_DEST_BOOTDIR),
                      LXC.BindEntry(self.arch_dir.realpath(), self.LXC_DEST_ARCH)]
+        if self.iso_output:
+            self.lxc_buildconf_d.join(self.LXC_DEST_ISO_PARENT).makedirs(sudo=True)
+            bind_dirs.append(LXC.BindEntry(FSPath(self.iso_output).parent_directory.realpath(),
+                                           self.LXC_DEST_ISO_PARENT))
         lxc = LXC.from_sfs("builddir-%d" % (os.getpid(),), auto_remove=True,
                            sfs_parts=["00-*", "scripts", "settings", self.lxc_buildconf_d, self.kernel_sfs.realpath()],
                            bind_dirs=bind_dirs)
@@ -1620,7 +1628,8 @@ class BootDirBuilder(FSPath):
         if 'grubconf' in self.build_targets:
             self.build_grubconf()
         if self.iso_output:
-            run_command(["grub-mkrescue", "-o", self.iso_output, self.path], show_output=True)
+            lxc_iso = FSPath(self.LXC_DEST_ISO_PARENT).join(FSPath(self.iso_output).basename).path
+            self.build_lxc.run(["grub-mkrescue", "-o", lxc_iso, self.LXC_DEST_BOOTDIR], show_output=True)
 
     def build_sfs(self):
         info("Building sfs files to %s", self.dist_dirname)
@@ -1665,13 +1674,16 @@ class BootDirBuilder(FSPath):
 
     def build_efi(self):
         info("Building EFI image (%s)", self.efi_arch)
-        efi_img = self.join("EFI", "Boot", "bootx64.efi")
-        efi_img.parent_directory.makedirs()
-        efi_modpath = self.join("boot/grub", self.efi_arch)
-        efi_modpath.makedirs()
-        run_command(["install", "-D", "-t", efi_modpath.path] +
-                    map(lambda n: n.path, self.efi_src_d.walk()))
-        run_command(["grub-mkimage", "-o", efi_img.path, "-O", self.efi_arch, "-p", "boot/grub"] + self.efi_mods)
+        efi_img = "EFI/Boot/bootx64.efi"
+        grub_prefix = "boot/grub"
+        self.join(efi_img).parent_directory.makedirs()
+        self.join(grub_prefix).makedirs()
+        lxc_efi_img = "%s/%s" % (self.LXC_DEST_BOOTDIR, efi_img)
+        lxc_grub_dir = "%s/%s" % (self.LXC_DEST_BOOTDIR, grub_prefix)
+        lxc_efi_src = "/usr/lib/grub/%s" % (self.efi_arch,)
+
+        self.build_lxc.run(["cp", "-r", lxc_efi_src, lxc_grub_dir])
+        self.build_lxc.run(["grub-mkimage", "-o", lxc_efi_img, "-O", self.efi_arch, "-p", grub_prefix] + self.efi_mods)
 
     def build_ramdisk(self, **makeargs):
         info("Building ramdisk-%s", self.kver)
