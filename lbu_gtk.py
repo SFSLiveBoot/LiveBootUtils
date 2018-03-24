@@ -4,7 +4,7 @@ import gi
 import lbu_common
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Pango
 
 from logging import warn
 
@@ -29,7 +29,10 @@ class AppWindow(Gtk.ApplicationWindow):
 
         self.sfs_store = Gtk.ListStore(*map(lambda c: c[1], self.sfs_store_cols))
         sw = Gtk.ScrolledWindow()
-        self.add(sw)
+        vbox = Gtk.Box()
+        vbox.set_orientation(Gtk.Orientation.VERTICAL)
+        vbox.pack_start(sw, True, True, 0)
+        self.add(vbox)
         self.tv = Gtk.TreeView(self.sfs_store)
         name_render = Gtk.CellRendererText()
         file_icon_render = Gtk.CellRendererPixbuf()
@@ -45,11 +48,16 @@ class AppWindow(Gtk.ApplicationWindow):
 
         self.tv.append_column(
             Gtk.TreeViewColumn("Backend", Gtk.CellRendererText(), text=self.store_col_idx('file-path')))
-        tvc = Gtk.TreeViewColumn("Up to date")
+        self.upd_tvc = tvc = Gtk.TreeViewColumn("Up to date")
         tvc.pack_start(update_icon_render, False)
         tvc.pack_start(update_text_render, True)
+        update_text_render.set_property("ellipsize", Pango.EllipsizeMode.MIDDLE)
         tvc.set_attributes(update_icon_render, icon_name=self.store_col_idx('update-icon'))
         tvc.set_attributes(update_text_render, text=self.store_col_idx('update-reason'))
+        tvc.set_resizable(True)
+        tvc.set_min_width(300)
+        self.tv.connect("query-tooltip", self.on_query_tooltip)
+        self.tv.set_has_tooltip(True)
         self.tv.append_column(tvc)
         self.tv.append_column(Gtk.TreeViewColumn("Stamp", Gtk.CellRendererText(), text=self.store_col_idx('stamp')))
         self.tv.append_column(
@@ -57,7 +65,24 @@ class AppWindow(Gtk.ApplicationWindow):
         self.tv.append_column(
             Gtk.TreeViewColumn("Commit", Gtk.CellRendererText(), text=self.store_col_idx('git-commit')))
         sw.add(self.tv)
+
+        buttonbox = Gtk.Box()
+        vbox.pack_start(buttonbox, False, True, 0)
+        self.refresh_button = Gtk.Button.new_with_label("Refresh")
+        buttonbox.pack_start(self.refresh_button, False, False, 0)
         self.show_all()
+
+    def on_query_tooltip(self, tv, x, y, kbd_mode, tooltip):
+        has_row, tx, ty, model, path, iter = tv.get_tooltip_context(x, y, kbd_mode)
+        if not has_row:
+            return
+        tvc_path, tvc, x, y = tv.get_path_at_pos(tx, ty)
+        if tvc == self.upd_tvc:
+            txt = model[iter][self.store_col_idx("update-reason")]
+        else:
+            txt = model[iter][self.store_col_idx("mnt")]
+        if txt:
+            tv.set_tooltip_text(txt)
 
     def do_sfs_check(self, store_path):
         row = self.sfs_store[store_path]
@@ -111,6 +136,7 @@ class Application(Gtk.Application):
     def do_activate(self):
         if self.window is None:
             self.window = AppWindow(application=self, title="Live Boot Utils")
+            self.window.refresh_button.connect("clicked", self.update_sfs_info)
         self.window.present()
         self.update_sfs_info()
 
@@ -127,7 +153,7 @@ class Application(Gtk.Application):
                 self.more_to_check.append(more_checks)
         return True if self.more_to_check else False
 
-    def update_sfs_info(self):
+    def update_sfs_info(self, *args):
         self.window.sfs_store.clear()
         self.more_to_check = []
 
@@ -160,6 +186,6 @@ class Application(Gtk.Application):
 if __name__ == '__main__':
     import logging
 
-    logging.root.setLevel(logging.DEBUG)
+    # logging.root.setLevel(logging.DEBUG)
     app = Application()
     app.run()
