@@ -1675,11 +1675,11 @@ class BootDirBuilder(FSPath):
     def build_efi(self):
         info("Building EFI image (%s)", self.efi_arch)
         efi_img = "EFI/Boot/bootx64.efi"
-        grub_prefix = "boot/grub"
+        grub_prefix = "/boot/grub"
         self.join(efi_img).parent_directory.makedirs()
         self.join(grub_prefix).makedirs()
         lxc_efi_img = "%s/%s" % (self.LXC_DEST_BOOTDIR, efi_img)
-        lxc_grub_dir = "%s/%s" % (self.LXC_DEST_BOOTDIR, grub_prefix)
+        lxc_grub_dir = "%s%s" % (self.LXC_DEST_BOOTDIR, grub_prefix)
         lxc_efi_src = "/usr/lib/grub/%s" % (self.efi_arch,)
 
         self.build_lxc.run(["cp", "-r", lxc_efi_src, lxc_grub_dir])
