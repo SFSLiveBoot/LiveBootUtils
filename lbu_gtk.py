@@ -16,7 +16,8 @@ from logging import warn
 class AppWindow(Gtk.ApplicationWindow):
     sfs_store_cols = [('file', object), ('file-path', str), ('mnt', str), ('stamp', str), ('icon-name', str),
                       ('need-update', bool), ('update-reason', str), ('update-icon', str),
-                      ('latest-stamp', str), ('git-commit', str), ('git-source', str), ('git-source-commit', str)]
+                      ('latest-stamp', str), ('git-commit', str), ('git-source', str), ('git-source-commit', str),
+                      ('git-source-save', str)]
 
     def store_col_idx(self, name):
         for i, c in enumerate(self.sfs_store_cols):
@@ -64,8 +65,16 @@ class AppWindow(Gtk.ApplicationWindow):
         self.tv.set_has_tooltip(True)
         self.tv.append_column(tvc)
         self.tv.append_column(Gtk.TreeViewColumn("Stamp", Gtk.CellRendererText(), text=self.store_col_idx('stamp')))
-        self.tv.append_column(
-            Gtk.TreeViewColumn("Source", Gtk.CellRendererText(), text=self.store_col_idx('git-source')))
+        src_rndr = Gtk.CellRendererText()
+        src_rndr.set_property("editable", True)
+        src_rndr.connect("edited", self.on_store_edited, 'git-source', 'git-source-save')
+        src_col = Gtk.TreeViewColumn("Source")
+        src_icon_rndr = Gtk.CellRendererPixbuf()
+        src_col.pack_start(src_icon_rndr, False)
+        src_col.pack_start(src_rndr, True)
+        src_col.set_attributes(src_rndr, text=self.store_col_idx('git-source'))
+        src_col.set_cell_data_func(src_icon_rndr, self.on_render_source_icon)
+        self.tv.append_column(src_col)
         self.tv.append_column(
             Gtk.TreeViewColumn("Commit", Gtk.CellRendererText(), text=self.store_col_idx('git-commit')))
         sw.add(self.tv)
@@ -75,6 +84,23 @@ class AppWindow(Gtk.ApplicationWindow):
         self.refresh_button = Gtk.Button.new_with_label("Refresh")
         buttonbox.pack_start(self.refresh_button, False, False, 0)
         self.show_all()
+
+    def on_render_source_icon(self, tvc, rndr, store, treeiter, x):
+        if store[treeiter][self.store_col_idx('git-source-save')]:
+            rndr.set_property('icon-name', 'text-editor')
+        else:
+            rndr.set_property('icon-name', None)
+
+    def on_store_edited(self, rndr, path, new_text, colname, save_col):
+        if save_col:
+            save_val = self.sfs_store[path][self.store_col_idx(save_col)]
+            if not new_text and save_col:
+                self.sfs_store[path][self.store_col_idx(colname)] = save_val
+                self.sfs_store[path][self.store_col_idx(save_col)] = None
+                return
+            if not save_val:
+                self.sfs_store[path][self.store_col_idx(save_col)] = self.sfs_store[path][self.store_col_idx(colname)]
+        self.sfs_store[path][self.store_col_idx(colname)] = new_text
 
     def on_query_tooltip(self, tv, x, y, kbd_mode, tooltip):
         has_row, tx, ty, model, path, iter = tv.get_tooltip_context(x, y, kbd_mode)
