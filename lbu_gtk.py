@@ -1,10 +1,14 @@
 #!/usr/bin/python
 
 import gi
+import os
+
 import lbu_common
+from lbu_common import cached_property
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib, Pango
+gi.require_version('Vte', '2.91')
+from gi.repository import Gtk, GLib, Pango, Vte
 
 from logging import warn
 
@@ -130,6 +134,12 @@ class Application(Gtk.Application):
     window = None
     more_to_check = None
 
+    @cached_property
+    def lbu_cmd(self):
+        cmd = [] if os.getuid() == 0 else ['/usr/bin/sudo']
+        cmd.append(os.path.join(os.path.dirname(__file__), 'lbu_cli.py'))
+        return cmd
+
     def do_startup(self):
         Gtk.Application.do_startup(self)
 
@@ -137,7 +147,47 @@ class Application(Gtk.Application):
         if self.window is None:
             self.window = AppWindow(application=self, title="Live Boot Utils")
             self.window.refresh_button.connect("clicked", self.update_sfs_info)
+            self.window.tv.connect('row-activated', self.on_row_activate)
         self.window.present()
+        self.update_sfs_info()
+
+    def on_row_activate(self, tv, path, tvc):
+        store = tv.get_model()
+        state, msg, mnt, sfs, src = map(lambda n: store[path][self.window.store_col_idx(n)],
+                                        ('update-icon', 'update-reason', 'mnt', 'file', 'git-source'))
+        dlg_msg = ''
+        if state == 'gtk-apply':
+            dlg_msg = "Looks like %s is up to date." % (sfs.path,)
+        elif state == 'network-error':
+            dlg_msg = "Cannot confirm due to network error:\n%s" % (msg,)
+        cmd = self.lbu_cmd + (
+            ['aufs-update-branch', mnt] if state == 'software-update-urgent' else [
+                'rebuild-sfs', sfs.curlink_sfs().path, src])
+
+        dlg = Gtk.MessageDialog(self.window, Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                                Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL,
+                                "%s\nDo you want to run: \n%s?" % (dlg_msg, " ".join(cmd),))
+        dlg.connect("response", self.on_dlg_update, cmd)
+        dlg.show_all()
+        dlg.run()
+
+    def on_dlg_update(self, dlg, response, cmd):
+        if response == Gtk.ResponseType.OK:
+            self.run_cmd(cmd)
+        dlg.destroy()
+
+    def run_cmd(self, cmd, end_callback=None):
+        term_win = Gtk.Window()
+        term_win.set_title(" ".join(cmd))
+        vte = Vte.Terminal()
+        term_win.add(vte)
+        term_win.show_all()
+        spawn = vte.spawn_sync(Vte.PtyFlags.DEFAULT, os.getcwd(), cmd, [],
+                               GLib.SpawnFlags.DO_NOT_REAP_CHILD, None, None)
+        vte.connect("child-exited", self.on_vte_finished, term_win)
+
+    def on_vte_finished(self, vte, ret_status, win):
+        win.set_title("Finished[%d]: %s" % (ret_status, win.get_title(),))
         self.update_sfs_info()
 
     def do_check_more(self):
