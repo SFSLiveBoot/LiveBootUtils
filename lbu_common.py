@@ -1564,20 +1564,23 @@ class BootDirBuilder(FSPath):
 
     @cached_property
     def build_lxc(self):
-        mkrd_git_dir = dl.dl_file(self.mkrd_src_url)
-        self.lxc_buildconf_d.join(self.LXC_MKRD_DIR).makedirs(sudo=True)
+        bind_dirs = []
+        sfs_parts = ["00-*", "scripts", "settings", self.lxc_buildconf_d]
+        if 'ramdisk' in self.build_targets or 'ramdisk_net' in self.build_targets:
+            mkrd_git_dir = dl.dl_file(self.mkrd_src_url)
+            self.lxc_buildconf_d.join(self.LXC_MKRD_DIR).makedirs(sudo=True)
+            bind_dirs.append(LXC.BindEntry(mkrd_git_dir, self.LXC_MKRD_DIR, True))
+            sfs_parts.append(self.kernel_sfs.realpath())
         self.lxc_buildconf_d.join(self.LXC_DEST_BOOTDIR).makedirs(sudo=True)
-        self.lxc_buildconf_d.join(self.LXC_DEST_ARCH).makedirs(sudo=True)
-        bind_dirs = [LXC.BindEntry(mkrd_git_dir, self.LXC_MKRD_DIR, True),
-                     LXC.BindEntry(self.realpath(), self.LXC_DEST_BOOTDIR),
-                     LXC.BindEntry(self.arch_dir.realpath(), self.LXC_DEST_ARCH)]
+        bind_dirs.append(LXC.BindEntry(self.realpath(), self.LXC_DEST_BOOTDIR))
+        if "vmlinuz" in self.build_targets or "ramdisk" in self.build_targets or "ramdisk_net" in self.build_targets or "sfs" in self.build_targets:
+            self.lxc_buildconf_d.join(self.LXC_DEST_ARCH).makedirs(sudo=True)
+            bind_dirs.append(LXC.BindEntry(self.arch_dir.realpath(), self.LXC_DEST_ARCH))
         if self.iso_output:
             self.lxc_buildconf_d.join(self.LXC_DEST_ISO_PARENT).makedirs(sudo=True)
             bind_dirs.append(LXC.BindEntry(FSPath(self.iso_output).parent_directory.realpath(),
                                            self.LXC_DEST_ISO_PARENT))
-        lxc = LXC.from_sfs("builddir-%d" % (os.getpid(),), auto_remove=True,
-                           sfs_parts=["00-*", "scripts", "settings", self.lxc_buildconf_d, self.kernel_sfs.realpath()],
-                           bind_dirs=bind_dirs)
+        lxc = LXC.from_sfs("builddir-%d" % (os.getpid(),), auto_remove=True, sfs_parts=sfs_parts, bind_dirs=bind_dirs)
         return lxc
 
     @cached_property
@@ -2083,3 +2086,9 @@ def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts
             args["bind_dirs"].append(LXC.BindEntry(src, dst, ro))
     lxc = LXC.from_sfs(name, **args)
     lxc.start(foreground=True)
+
+
+@cli_func(desc="Build EFI-bootable directory (should be topdir of a removable)")
+def build_efi(path, arch=os.uname()[4], kver=os.uname()[2]):
+    builder = BootDirBuilder(path, build_targets={'efi', 'grubconf'}, arch=arch, kver=kver, extra_dirs=[])
+    builder.build()
