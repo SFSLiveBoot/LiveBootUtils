@@ -718,6 +718,9 @@ class SFSDirectory(object):
     def all_sfs(self):
         return list(sorted(self.backend.walk(file_class=SFSFile), key=lambda s: s.basename))
 
+    def join(self, *args, **kwargs):
+        return self.backend.join(*args, **kwargs)
+
     def find_sfs(self, name):
         for sfs in self.all_sfs:
             if sfs.basename==name:
@@ -1607,11 +1610,11 @@ class BootDirBuilder(FSPath):
 
     @cached_property
     def kernel_sfs(self):
-        return SFSFile(self.join(self.dist_dirname, self.source_list.kernel_sfs))
+        return SFSFile(self.dist_dir.join(self.source_list.kernel_sfs))
 
     @cached_property
     def arch_dir(self):
-        return self.join(self.dist_dirname, self.arch)
+        return self.dist_dir.join(self.arch)
 
     @cached_property
     def arch(self):
@@ -1639,6 +1642,10 @@ class BootDirBuilder(FSPath):
             ret.append(sfs_base)
         return ret
 
+    @cached_property
+    def dist_dir(self):
+        return SFSDirectory(self.join(self.dist_dirname))
+
     def build(self):
         if 'sfs' in self.build_targets:
             self.build_sfs()
@@ -1653,6 +1660,7 @@ class BootDirBuilder(FSPath):
         if 'grubconf' in self.build_targets:
             self.build_grubconf()
         if self.iso_output:
+            self.dist_dir.prune_old_sfs()
             lxc_iso = FSPath(self.LXC_DEST_ISO_PARENT).join(FSPath(self.iso_output).basename).path
             self.build_lxc.run(["grub-mkrescue", "-o", lxc_iso, self.LXC_DEST_BOOTDIR], show_output=True)
 
@@ -1661,7 +1669,7 @@ class BootDirBuilder(FSPath):
         source_list = self.source_list
         for src_url, sfs_name in source_list:
             info("Building: %s -> %s", src_url, sfs_name)
-            dest_sfs = SFSFile(self.join(self.dist_dirname, sfs_name.lstrip('/')))
+            dest_sfs = SFSFile(self.dist_dir.join(sfs_name.lstrip('/')))
             dest_sfs.parent_directory.makedirs()
             if os.path.isfile(src_url) or (
                     (src_url.endswith('.sfs') and (src_url.startswith('http://') or src_url.startswith('https://')))):
