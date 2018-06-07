@@ -728,6 +728,24 @@ class SFSDirectory(object):
             if sfs.basename == name:
                 yield sfs
 
+    def prune_old_sfs(self):
+        for old_sfs in self.backend.walk(pattern="*.sfs.OLD*"):
+            try: link_target = old_sfs.symlink_target
+            except OSError: pass
+            else:
+                if not '/' in link_target:
+                    is_current = False
+                    sl = old_sfs.parent_directory.join(link_target)
+                    for cur_sfs in old_sfs.parent_directory.walk(pattern='*.sfs', depth=0):
+                        if os.path.samefile(cur_sfs.path, sl.path):
+                            is_current = True
+                            break
+                    if not is_current:
+                        info("Unlinking: %s", sl.path)
+                        sl.unlink()
+            info("Unlinking: %s", old_sfs.path)
+            old_sfs.unlink()
+
 
 class SFSDirectoryAufs(SFSDirectory):
     def __init__(self, backend='/'):
@@ -848,7 +866,7 @@ class FSPath(object):
     def realpath(self):
         return FSPath(os.path.realpath(self.path))
 
-    def walk(self, pattern=None, file_class=None, exclude=None):
+    def walk(self, pattern=None, file_class=None, exclude=None, depth=None):
         if pattern is None: pattern = self.walk_pattern
         if isinstance(pattern, basestring):
             pattern = pattern.split(",")
@@ -856,8 +874,9 @@ class FSPath(object):
         if isinstance(exclude, basestring):
             exclude = exclude.split(",")
         if file_class is None: file_class=FSPath
+        if depth is None: depth=self.walk_depth
         for d, dn, fn in self._os_walk(self.path):
-            if self.walk_depth is not None and d.count('/') - self.path.count('/') == self.walk_depth:
+            if depth is not None and d.count('/') - self.path.count('/') == depth:
                 dn[:] = []
             if not self.walk_hidden:
                 dn[:]=filter(lambda x: not x.startswith("."), dn)
@@ -958,6 +977,9 @@ class FSPath(object):
             except OSError as e:
                 warn("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
         clear_cached_properties(self)
+
+    def unlink(self):
+        os.unlink(self.path)
 
     @property
     def loop_dev(self):
@@ -2092,3 +2114,8 @@ def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts
 def build_efi(path, arch=os.uname()[4], kver=os.uname()[2]):
     builder = BootDirBuilder(path, build_targets={'efi', 'grubconf'}, arch=arch, kver=kver, extra_dirs=[])
     builder.build()
+
+@cli_func(desc="delete old .sfs files from directory")
+def prune_old_sfs(path):
+    sfs_dir = SFSDirectory(path)
+    sfs_dir.prune_old_sfs()
