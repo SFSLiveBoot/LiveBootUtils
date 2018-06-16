@@ -1392,7 +1392,7 @@ def _load_mount_tab():
 
 
 class MountPoint(FSPath):
-    default_combined_fs_type = os.getenv("COMBINED_MOUNT_TYPE", "aufs")
+    default_combined_fs_type = os.getenv("COMBINED_MOUNT_TYPE", "overlay")
 
     def __del__(self):
         if self._remove_on_del:
@@ -1497,6 +1497,12 @@ class MountPoint(FSPath):
         if kwargs["fs_type"] == "aufs":
             dirs_arg = ":".join(["%s=rw" % (rw_mount.path,)] + map(lambda d: "%s=ro" % (d,), reversed(dirs)))
             kwargs.setdefault("dirs", dirs_arg)
+        elif kwargs["fs_type"] == "overlay":
+            kwargs.setdefault("lowerdir", ":".join(reversed(dirs)))
+            rw_mount.join("upper").makedirs(sudo=True)
+            kwargs.setdefault("upperdir", "%s/upper" % (rw_mount.path,))
+            rw_mount.join("work").makedirs(sudo=True)
+            kwargs.setdefault("workdir", "%s/work" %(rw_mount.path,))
         else:
             raise NotImplementedError("combined fs_type=%r is not implemented" % (kwargs["fs_type"]))
         self.mount("comnt-src", **kwargs)
