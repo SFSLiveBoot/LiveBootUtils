@@ -1392,6 +1392,8 @@ def _load_mount_tab():
 
 
 class MountPoint(FSPath):
+    default_combined_fs_type = os.getenv("COMBINED_MOUNT_TYPE", "aufs")
+
     def __del__(self):
         if self._remove_on_del:
             self.umount()
@@ -1488,13 +1490,16 @@ class MountPoint(FSPath):
                 if not part.mounted_path:
                     part.mount()
                 part = part.mounted_path
-            dirs.append("%s=ro" % (part.path,))
-        rw_mount = MountPoint(FSPath(lbu_cache_dir).join("aufs-rw-%s-%s"%(os.getpid(), time.time())))
-        rw_mount.mount("aufs-rw", fs_type="tmpfs", mode="0755")
-        dirs.append("%s=rw" % (rw_mount.path,))
-        kwargs.setdefault("fs_type", "aufs")
-        kwargs.setdefault("dirs", ":".join(reversed(dirs)))
-        self.mount("aufs-src", **kwargs)
+            dirs.append(part.path)
+        rw_mount = MountPoint(FSPath(lbu_cache_dir).join("comnt-rw-%s-%s"%(os.getpid(), time.time())))
+        rw_mount.mount("comnt-rw", fs_type="tmpfs", mode="0755")
+        kwargs.setdefault("fs_type", self.default_combined_fs_type)
+        if kwargs["fs_type"] == "aufs":
+            dirs_arg = ":".join(["%s=rw" % (rw_mount.path,)] + map(lambda d: "%s=ro" % (d,), reversed(dirs)))
+            kwargs.setdefault("dirs", dirs_arg)
+        else:
+            raise NotImplementedError("combined fs_type=%r is not implemented" % (kwargs["fs_type"]))
+        self.mount("comnt-src", **kwargs)
 
 
 class KVer(object):
@@ -2068,8 +2073,8 @@ def locate_sfs(*names):
     return ret
 
 @cli_func(desc="Mount combined filesystem from different parts")
-def mount_combined(dest_dir, parts):
-    MountPoint(dest_dir).mount_combined(parts.split())
+def mount_combined(dest_dir, parts, fs_type=MountPoint.default_combined_fs_type):
+    MountPoint(dest_dir).mount_combined(parts.split(), fs_type=fs_type)
 
 
 @cli_func(desc="Update aufs branch real-time")
