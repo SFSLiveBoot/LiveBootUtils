@@ -436,9 +436,11 @@ lxc.network.link = %(link)s
             cfg.add_hostnet()
         else:
             if veth is not None:
-                cfg.add_veth(*veth)
+                for v in veth if isinstance(veth, list) else [veth]:
+                    cfg.add_veth(*v)
             if vlan is not None:
-                cfg.add_vlan(*vlan)
+                for v in vlan if isinstance(vlan, list) else [vlan]:
+                    cfg.add_vlan(*v)
         if bind_dirs is not None:
             for bind_mnt in bind_dirs:
                 cfg.add_bind(bind_mnt)
@@ -2123,9 +2125,9 @@ def aufs_update_branch(mnt, aufs="/"):
 def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None):
     args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
     if vlan is not None:
-        args["vlan"] = vlan.split(":")
+        args["vlan"] = map(lambda v: v.split(":"), vlan.split(" "))
     if veth is not None:
-        args["veth"] = veth.split(":")
+        args["veth"] = map(lambda v: v.split(":"), veth.split(" "))
     if bind is not None:
         args["bind_dirs"] = []
         for b in bind.split():
