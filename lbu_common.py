@@ -237,8 +237,8 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
         @cached_property
         def devices_allow(self):
             return ["c 1:8 r", "c 1:9 r", "c 1:5 r",
-                    "c 1:3 rw", "c 1:7 rw", "c 5:0 rw",
-                    "c 136:* rw"]
+                    "c 1:3 rw", "c 1:7 rw",
+                    "c 5:0 rw", "c 5:2 rw", "c 136:* rw"]
 
         @cached_property
         def cap_cfg(self):
