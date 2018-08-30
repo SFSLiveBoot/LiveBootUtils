@@ -25,7 +25,11 @@ fi
 
 cache_dir="$(find_apt_fullpath "Dir::Cache::archives")"
 
-apt-get ${target_dist:+-t $target_dist} download --print-uris $(required_debpkg "$@") | while read url fname fsize fhash;do
+if ! required_debs="$(required_debpkg "$@")";then
+  exit 1
+fi
+
+test -z "$required_debs" || apt-get ${target_dist:+-t $target_dist} download --print-uris $required_debs | while read url fname fsize fhash;do
   test -z "$exclude_fnpat" || if echo "$fname" | grep -Eq "$exclude_fnpat";then continue; fi
   url="${url#'}"
   url="${url%'}"

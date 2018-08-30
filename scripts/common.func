@@ -120,9 +120,14 @@ sfs_stamp() {
 }
 
 required_debpkg() {
-  local apt_output
-  apt_output="$(apt-get ${dpkg_status:+-o Dir::State::status="$dpkg_status" }${target_dist:+-t $target_dist }install -s "$@")" || return $?
-  echo "$apt_output" | grep '^Inst' | sed -re 's/^Inst ([^ ]+)( \[[^]]+\])? \(([^ ]+) .*/\1=\3/'
+  local apt_output exit_st
+  if apt_output="$(apt-get ${dpkg_status:+-o Dir::State::status="$dpkg_status" }${target_dist:+-t $target_dist }install -s "$@")"; then
+    echo "$apt_output" | grep '^Inst' | sed -re 's/^Inst ([^ ]+)( \[[^]]+\])? \(([^ ]+) .*/\1=\3/'
+  else
+   exit_st="$?"
+   echo "$apt_output" >&2
+   return $exit_st
+  fi
 }
 
 unpack_deb() {
