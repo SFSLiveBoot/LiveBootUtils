@@ -550,7 +550,7 @@ class SFSBuilder(object):
         self.target = target_sfs
         if source is None and target_sfs.exists:
             source = target_sfs.git_source
-            try: target_env = map(lambda l: l.split("=", 1), target_sfs.open_file(self.BUILD_ENV_PATH).read().split("\n"))
+            try: target_env = map(lambda l: l.split("=", 1), filter(lambda v: v, target_sfs.open_file(self.BUILD_ENV_PATH).read().split("\n")))
             except IOError: pass
             else: self.run_env.update(target_env)
         if isinstance(source, basestring):
@@ -718,8 +718,9 @@ class SFSBuilder(object):
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
-        self.dest_dir.open_file(self.BUILD_ENV_PATH, "wb").write(
-            "\n".join(map(lambda (k, v): "%s=%s" % (k, v), self.run_env_mod.items())))
+        env_mod = self.run_env_mod.items()
+        if env_mod:
+            self.dest_dir.open_file(self.BUILD_ENV_PATH, "wb").write("\n".join(map(lambda (k, v): "%s=%s" % (k, v), env_mod)))
         run_command(cmd, show_output=True)
         self.target.replace_file(dst_temp)
         sfs_finder.register_sfs(self.target)
