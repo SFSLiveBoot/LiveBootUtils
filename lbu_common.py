@@ -532,6 +532,7 @@ class SFSBuilder(object):
     GIT_SOURCE_PATH = os.path.join(SFS_SRC_D, '.git-source')
     GIT_COMMIT_PATH = os.path.join(SFS_SRC_D, '.git-commit')
     SQFS_EXCLUDE = os.path.join(SFS_SRC_D, ".sqfs-exclude")
+    BUILD_ENV_PATH = os.path.join(SFS_SRC_D, ".env")
 
     LXC_PARTS_FILE = os.path.join(SFS_SRC_D, ".lxc-build-parts")
     LXC_DESTDIR = "/destdir"
@@ -549,6 +550,9 @@ class SFSBuilder(object):
         self.target = target_sfs
         if source is None and target_sfs.exists:
             source = target_sfs.git_source
+            try: target_env = map(lambda l: l.split("=", 1), target_sfs.open_file(self.BUILD_ENV_PATH).read().split("\n"))
+            except IOError: pass
+            else: self.run_env.update(target_env)
         if isinstance(source, basestring):
             if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
                 source = GitRepo(source)
@@ -643,7 +647,7 @@ class SFSBuilder(object):
         return lxc
 
     @cached_property
-    def run_env(self):
+    def _run_env_def(self):
         return dict(
             dl.proxy_env,
             TERM=os.environ.get("TERM", "linux"),
@@ -654,6 +658,20 @@ class SFSBuilder(object):
             SILENT_EXIT="1",
             HOME="/root",
             LANG="C.UTF-8")
+
+    @cached_property
+    def run_env(self):
+        return dict(self._run_env_def)
+
+    @property
+    def run_env_mod(self):
+        ret = self.run_env.copy()
+        for k, v in self._run_env_def.items():
+            if k in ret and ret[k] == v:
+                del ret[k]
+            elif k not in ret:
+                ret[k] = ""
+        return ret
 
     def run_in_dest(self, cmd, **args):
         if not "env" in args:
@@ -700,6 +718,8 @@ class SFSBuilder(object):
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
+        self.dest_dir.open_file(self.BUILD_ENV_PATH, "wb").write(
+            "\n".join(map(lambda (k, v): "%s=%s" % (k, v), self.run_env_mod.items())))
         run_command(cmd, show_output=True)
         self.target.replace_file(dst_temp)
         sfs_finder.register_sfs(self.target)
