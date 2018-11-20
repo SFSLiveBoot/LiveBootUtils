@@ -527,6 +527,10 @@ class SFSFinder(object):
 sfs_finder = SFSFinder()
 
 
+def _load_build_env(data):
+    return map(lambda l: l.split("=", 1), filter(lambda v: v, data.split("\n")))
+
+
 class SFSBuilder(object):
     SFS_SRC_D = '/usr/src/sfs.d'
     GIT_SOURCE_PATH = os.path.join(SFS_SRC_D, '.git-source')
@@ -550,9 +554,8 @@ class SFSBuilder(object):
         self.target = target_sfs
         if source is None and target_sfs.exists:
             source = target_sfs.git_source
-            try: target_env = map(lambda l: l.split("=", 1), filter(lambda v: v, target_sfs.open_file(self.BUILD_ENV_PATH).read().split("\n")))
+            try: self.run_env.update(_load_build_env(target_sfs.open_file(self.BUILD_ENV_PATH).read()))
             except IOError: pass
-            else: self.run_env.update(target_env)
         if isinstance(source, basestring):
             if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
                 source = GitRepo(source)
@@ -1232,6 +1235,7 @@ class SFSFile(FSPath):
     UPTDCHECK_PATH = os.path.join(SFSBuilder.SFS_SRC_D, '.check-up-to-date')
     GIT_SOURCE_PATH = SFSBuilder.GIT_SOURCE_PATH
     GIT_COMMIT_PATH = SFSBuilder.GIT_COMMIT_PATH
+    BUILD_ENV_PATH = SFSBuilder.BUILD_ENV_PATH
     PARTS_DIR='/.parts'
 
     progress_cb=None
@@ -1354,6 +1358,8 @@ class SFSFile(FSPath):
         try:
             run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir,
                            lbu=FSPath(__file__).parent_directory.path)
+            try: run_env.update(_load_build_env(self.open_file(self.BUILD_ENV_PATH).read()))
+            except IOError: pass
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
                         show_output=True, env=run_env)
         except CommandFailed as e:
