@@ -94,7 +94,7 @@ class AppWindow(Gtk.ApplicationWindow):
     def on_store_edited(self, rndr, path, new_text, colname, save_col):
         if save_col:
             save_val = self.sfs_store[path][self.store_col_idx(save_col)]
-            if not new_text and save_col:
+            if not new_text and save_val:
                 self.sfs_store[path][self.store_col_idx(colname)] = save_val
                 self.sfs_store[path][self.store_col_idx(save_col)] = None
                 return
@@ -120,7 +120,8 @@ class AppWindow(Gtk.ApplicationWindow):
         try:
             row[self.store_col_idx('stamp')] = lbu_common.stamp2txt(sfs.create_stamp)
             if sfs.git_source:
-                row[self.store_col_idx('git-source')] = "%s#%s" % (sfs.git_source, sfs.git_branch)
+                row[self.store_col_idx('git-source')] = "%s%s" % (
+                    sfs.git_source, "" if sfs.git_branch is None else "#%s" % (sfs.git_branch,))
                 row[self.store_col_idx('git-commit')] = sfs.git_commit
             curlink = sfs.curlink_sfs()
         except Exception as e:
@@ -188,7 +189,9 @@ class Application(Gtk.Application):
             dlg_msg = "Cannot confirm due to network error:\n%s" % (msg,)
         cmd = self.lbu_cmd + (
             ['aufs-update-branch', mnt] if state == 'software-update-urgent' else [
-                'rebuild-sfs', sfs.curlink_sfs().path, src])
+                'rebuild-sfs', sfs.curlink_sfs().path])
+        sfs_src = "%s%s" % (sfs.git_source, "" if sfs.git_branch is None else "#%s" % (sfs.git_branch))
+        if sfs_src != src: cmd.append(src)
 
         dlg = Gtk.MessageDialog(self.window, Gtk.DialogFlags.DESTROY_WITH_PARENT,
                                 Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK_CANCEL,
