@@ -25,7 +25,7 @@ if hasattr(urllib2, "addinfourl"):
 
 
 class CommandFailed(EnvironmentError): pass
-
+class BuildAborted(RuntimeError): pass
 
 class FilesystemError(LookupError): pass
 
@@ -545,6 +545,8 @@ class SFSBuilder(object):
     LXC_LBU = "/opt/LiveBootUtils"
     LXC_INIT_CMD = ["sleep", os.environ.get("LXC_INIT_SLEEP", "7200")]
 
+    SFS_BUILD_PROFILE_SH = os.path.join(lbu_dir, "scripts", "sfs_build_profile.sh")
+
     dest_dir_parent = os.path.join(lbu_cache_dir, "rebuild")
     default_lxc_parts = ["00-*", "scripts", "settings"]
 
@@ -697,18 +699,23 @@ class SFSBuilder(object):
             cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
             try: self.run_in_dest(cmd, show_output=True)
             except CommandFailed as e:
+                warn("Script %r failed with %d", script.basename, e[1])
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
-                raise
+                raise BuildAborted()
         if "LAST_BUILD_SCRIPT" in self.run_env:
             script = self.run_env.get("LAST_BUILD_SCRIPT")
             self.run_in_dest(["sh", "-c", self.run_env["LAST_BUILD_SCRIPT"]], show_output=True)
         if script is None and self.source is None:
             warn("No scripts found and no source given. No modifications will happen by default.")
             if sys.stdin.isatty():
-                info("Modify $DESTDIR using interactive shell, type 'exit 0' to build and 'exit 1' to cancel.")
-                run_command(["bash", "-i"], cwd=self.dest_dir.path, show_output=True,
-                            env=dict(self.run_env, DESTDIR=self.dest_dir.path))
+                info("Modify $DESTDIR using interactive shell.")
+                try:
+                    run_command(["bash", "--rcfile", self.SFS_BUILD_PROFILE_SH, "-i"], cwd=self.dest_dir.path, show_output=True,
+                                env=dict(self.run_env, sfs_build_target=self.target.basename, DESTDIR=self.dest_dir.path))
+                except CommandFailed as e:
+                    warn("Modification aborted (exit status: %s)", e[1])
+                    raise BuildAborted()
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
