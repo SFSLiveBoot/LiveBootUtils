@@ -588,7 +588,7 @@ class SFSBuilder(object):
             if not isinstance(self.source, GitRepo):
                 raise ValueError("Source is not GitRepo")
             git_tar_out = ("cd \"$SRC\";git archive HEAD | tar x -C \"$DESTDIR\";"
-                           "P=\"$PWD\" git submodule --quiet foreach "
+                           "P=\"$(readlink -f .)\" git submodule --quiet foreach "
                            "'git archive --prefix=\"${PWD#$P/}/\" HEAD | tar x -C \"$DESTDIR\"'")
             run_command(["sh", "-c", git_tar_out],
                         env=dict(DESTDIR=dest_dir.path, SRC=self.source.path), as_user="root")
