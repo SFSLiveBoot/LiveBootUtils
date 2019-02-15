@@ -1622,8 +1622,8 @@ class BootDirBuilder(FSPath):
                 "hfsplus", "chain", "multiboot", "terminal", "lspci", "font", "efi_gop", "efi_uga", "gfxterm"]
     efi_arch = "x86_64-efi"
     iso_output = None
-    kernel_append = None
-    serial_console = None
+    kernel_append = os.environ.get('BOOT_KERNEL_APPEND')
+    serial_console = os.environ.get('BOOT_SERIAL_CONSOLE')
 
     LXC_DEST_ARCH = "/destdir/arch"
     LXC_MKRD_DIR = "/usr/src/make-ramdisk"
