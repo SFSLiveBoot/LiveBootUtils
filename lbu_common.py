@@ -480,6 +480,8 @@ lxc.network.link = %(link)s
     def shutdown(self):
         run_command(["lxc-stop", "-k", "-n", self.name], as_user="root")
 
+def uniq_list(lst):
+    return reduce(lambda a,b: a+[b] if len(a)==0 or a[-1]!=b else a, lst, [])
 
 class SFSFinder(object):
     def __init__(self, sfs_list=None):
@@ -496,7 +498,7 @@ class SFSFinder(object):
         else:
             dirlist = map(lambda e: FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path,
                           filter(lambda e: e["fs_type"] == "squashfs", global_mountinfo))
-        return dict(map(lambda p: (p, SFSDirectory(p)), dirlist))
+        return dict(map(lambda p: (p, SFSDirectory(p)), filter(lambda d: os.path.exists(d), uniq_list(dirlist))))
 
     def search_dirs(self, name, sfs_dirs=None):
         sfs_found = []
