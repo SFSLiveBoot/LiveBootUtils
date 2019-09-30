@@ -550,7 +550,7 @@ class SFSBuilder(object):
     SFS_BUILD_PROFILE_SH = os.path.join(lbu_dir, "scripts", "sfs_build_profile.sh")
 
     dest_dir_parent = os.path.join(lbu_cache_dir, "rebuild")
-    default_lxc_parts = ["00-*", "scripts", "settings"]
+    default_lxc_parts = os.environ.get('LXC_BUILD_SFS_PARTS', '00-* scripts settings').split()
 
     def __init__(self, target_sfs, source=None):
         if not isinstance(target_sfs, SFSFile):
@@ -1616,8 +1616,8 @@ class SourceList(FSPath):
 
 class BootDirBuilder(FSPath):
     dist_dirname = 'sfs'
-    build_targets = set(['efi', 'sfs', 'ramdisk', 'grubconf', 'vmlinuz'])
-    mkrd_src_url = "https://github.com/SFSLiveBoot/make-ramdisk.git"
+    build_targets = set(os.environ.get("LBU_BUILD_TARGETS", "efi sfs ramdisk grubconf vmlinuz").split())
+    mkrd_src_url = os.environ.get("LBU_MKRD_URL", "https://github.com/SFSLiveBoot/make-ramdisk.git")
 
     efi_mods = ["configfile", "ext2", "fat"'', "part_gpt", "part_msdos", "normal", "linux", "ls", "boot", "echo",
                 "reboot", "search", "search_fs_file", "search_fs_uuid", "search_label", "help", "ntfs", "ntfscomp",
@@ -1646,7 +1646,7 @@ class BootDirBuilder(FSPath):
     @cached_property
     def build_lxc(self):
         bind_dirs = []
-        sfs_parts = ["00-*", "scripts", "settings", self.lxc_buildconf_d]
+        sfs_parts = SFSBuilder.default_lxc_parts+[self.lxc_buildconf_d]
         if 'ramdisk' in self.build_targets or 'ramdisk_net' in self.build_targets:
             mkrd_git_dir = dl.dl_file(self.mkrd_src_url)
             self.lxc_buildconf_d.join(self.LXC_MKRD_DIR).makedirs(sudo=True)
@@ -1782,7 +1782,7 @@ class BootDirBuilder(FSPath):
             makeargs["RAMDISK_DESTDIR"] = "%s/" % (self.LXC_DEST_ARCH,)
         self.arch_dir.makedirs()
         cmd = ["make", "-C", self.LXC_MKRD_DIR] + map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
-        self.build_lxc.run(cmd, env=self.run_env)
+        self.build_lxc.run(cmd, env=self.run_env, show_output=True)
 
 
 @cli_func(desc="List AUFS original components")

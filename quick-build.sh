@@ -108,4 +108,7 @@ EOF
 fi
 
 run cd "$bootstrap_d"
-run $SUDO env $(env | grep -i '^[^=]*_proxy=') ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK" }SFS_FIND_PATH="$bootstrap_d" $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux "$output_iso"
+IFS="
+"
+run $SUDO env $(env | grep -i -e '^[^=]*_proxy=' -e '^lxc_' -e '^lbu_' -e '^ssh_auth_sock=') SFS_FIND_PATH="$bootstrap_d" \
+  $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux "$output_iso"
