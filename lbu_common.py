@@ -726,7 +726,9 @@ class SFSBuilder(object):
                 self.dest_dir.open_file(self.GIT_SOURCE_PATH, "wb").write(git_source_url)
                 self.dest_dir.open_file(self.GIT_COMMIT_PATH, "wb").write(self.source.last_commit)
             if self.source.join(".git-facls").exists:
-                self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
+                try: self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
+                except CommandFailed as e:
+                    warn("setfacl failed: %r", e[2])
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
