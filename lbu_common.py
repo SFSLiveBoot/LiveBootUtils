@@ -453,6 +453,8 @@ lxc.net.%(netnum)d.link = %(link)s
                 if part.mounted_path is None:
                     part.mount()
         cfg = LXC.Config(name, sfs_parts=" ".join(map(lambda p: p.realpath().path, all_parts)))
+        if "devices_allow" in attrs:
+            cfg.devices_allow = attrs.pop("devices_allow")
         if veth is None and vlan is None:
             cfg.add_hostnet()
         else:
@@ -2181,7 +2183,7 @@ def aufs_update_branch(mnt, aufs="/"):
 
 
 @cli_func(desc='Run LXC instance. bind is space-separated entries of <src_dir>=<dst_dir>[:ro]')
-def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None):
+def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None, devs=None):
     args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
     if vlan is not None:
         args["vlan"] = map(lambda v: v.split(":"), vlan.split(" "))
@@ -2196,6 +2198,8 @@ def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts
             else:
                 ro = False
             args["bind_dirs"].append(LXC.BindEntry(src, dst, ro))
+    if devs is not None:
+        args["devices_allow"] = devs.split(",")
     lxc = LXC.from_sfs(name, **args)
     lxc.start(foreground=True)
 
