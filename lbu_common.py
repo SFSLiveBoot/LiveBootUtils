@@ -169,6 +169,10 @@ class CLIProgressReporter(object):
         self.output_stream.flush()
 
 pr_cls = CLIProgressReporter
+try:
+    lxc_v3 = os.popen('lxc-info --version').read().split('.')[0]=='3'
+except OSError as e:
+    warn("Cannot get LXC version: %s", e)
 
 
 class TemplatedString(object):
@@ -210,13 +214,19 @@ class LXC(object):
             return "%r -> %r%s"%(self.src, self.dst, " [RO]" if self.ro else "")
 
     class Config(TemplatedString):
-        template = """
+        template = ("""
+lxc.uts.name = %(name)s
+lxc.rootfs.path = %(rootfs)s
+lxc.pty.max = 1024
+
+lxc.log.level = 1""" if lxc_v3 else """
 lxc.utsname = %(name)s
 lxc.rootfs = %(rootfs)s
 lxc.pts = 1024
 lxc.kmsg = 0
 
 lxc.loglevel = 1
+""") + """
 lxc.autodev = 1
 lxc.mount.auto = proc sys
 lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(sfs_parts)s"'
@@ -288,6 +298,12 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
 
         class VEth(TemplatedString):
             template = """
+lxc.net.%(netnum)d.type = veth
+lxc.net.%(netnum)d.flags = up
+%(link_cfg)s
+%(ip_cfg)s
+%(gw_cfg)s
+lxc.net.%(netnum)d.script.up = /bin/sh -c '%(veth_up_script)s'""" if lxc_v3 else """
 lxc.network.type = veth
 lxc.network.flags = up
 %(link_cfg)s
@@ -298,49 +314,52 @@ lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
 
             @cached_property
             def link_cfg(self):
-                return "lxc.network.link = %s" % (self.link,) if self.link else ""
+                return (("lxc.net.%(netnum)d.link = %(link)s" if lxc_v3 else "lxc.network.link = %(link)s") % self) if self.link else ""
 
             @cached_property
             def ip_cfg(self):
-                return "lxc.network.ipv4 = %s" % (self.ip,) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4 = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s" ) % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
-                return "lxc.network.ipv4.gateway = %s" % (self.gw,) if self.gw else ""
+                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s" if lxc_v3 else "lxc.network.ipv4.gateway = %(gw)s") % self) if self.gw else ""
 
-            def __init__(self, link, ip=None, gw=None):
-                TemplatedString.__init__(self, link=link, ip=ip, gw=gw)
+            def __init__(self, link, ip=None, gw=None, netnum=0):
+                TemplatedString.__init__(self, link=link, ip=ip, gw=gw, netnum=netnum)
 
         class VLan(TemplatedString):
             template = """
-lxc.network.type = macvlan
-lxc.network.macvlan.mode = bridge
-lxc.network.flags = up
-lxc.network.link = %(link)s
+lxc.net.%(netnum)d.type = macvlan
+lxc.net.%(netnum)d.macvlan.mode = bridge
+lxc.net.%(netnum)d.flags = up
+lxc.net.%(netnum)d.link = %(link)s
 %(ip_cfg)s
 %(gw_cfg)s"""
 
             @cached_property
             def ip_cfg(self):
-                return "lxc.network.ipv4 = %s" % (self.ip,) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4 = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s") % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
-                return "lxc.network.ipv4.gateway = %s" % (self.gw,) if self.gw else ""
+                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s" if lxc_v3 else "lxc.network.ipv4.gateway = %(gw)s") % self) if self.gw else ""
 
             def __init__(self, link, ip=None, gw=None):
                 TemplatedString.__init__(self, link=link, ip=ip, gw=gw)
 
         def __init__(self, name, **attrs):
             self.name = name
+            self.netnum = 0
             self.extra_parts = []
             TemplatedString.__init__(self, **attrs)
 
         def add_vlan(self, link, ip=None, gw=None):
-            self.extra_parts.append(self.VLan(link, ip, gw))
+            self.extra_parts.append(self.VLan(link, ip, gw, self.netnum))
+            self.netnum+=1
 
         def add_veth(self, link, ip=None, gw=None):
-            self.extra_parts.append(self.VEth(link, ip, gw))
+            self.extra_parts.append(self.VEth(link, ip, gw, self.netnum))
+            self.netnum+=1
 
         def add_bind(self, src, dst=None, ro=False):
             if isinstance(src, LXC.BindEntry):
@@ -351,7 +370,8 @@ lxc.network.link = %(link)s
             self.extra_parts.append(self.MountEntry(src, dst, ro))
 
         def add_hostnet(self):
-            self.extra_parts.append("lxc.network.type=none")
+            self.extra_parts.append("lxc.net.%d.type=none" % (self.netnum, ) if lxc_v3 else "lxc.network.type=none")
+            self.netnum+=1
 
     def __init__(self, name=None, **attrs):
         if name is None:
