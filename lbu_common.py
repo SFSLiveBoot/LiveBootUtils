@@ -310,7 +310,7 @@ lxc.network.flags = up
 %(ip_cfg)s
 %(gw_cfg)s
 lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
-            veth_up_script = 'iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off'
+            veth_up_script = os.environ.get("LXC_VETH_UP_SCRIPT", 'iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off')
 
             @cached_property
             def link_cfg(self):
@@ -318,7 +318,7 @@ lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
 
             @cached_property
             def ip_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4 = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s" ) % self) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s" ) % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
@@ -338,7 +338,7 @@ lxc.net.%(netnum)d.link = %(link)s
 
             @cached_property
             def ip_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4 = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s") % self) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s") % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
