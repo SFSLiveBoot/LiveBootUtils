@@ -31,8 +31,7 @@ fi
 
 test -z "$required_debs" || apt-get ${target_dist:+-t $target_dist} download --print-uris $required_debs | while read url fname fsize fhash;do
   test -z "$exclude_fnpat" || if echo "$fname" | grep -Eq "$exclude_fnpat";then continue; fi
-  url="${url#'}"
-  url="${url%'}"
+  url="$(echo "$url" | tr -d "'")"
   echo -n "${fname%%_*} = $url .. "
   test -z "$show_only" || { echo; continue; }
   case "$url" in
