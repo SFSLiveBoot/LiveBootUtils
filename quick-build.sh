@@ -4,14 +4,15 @@ set -e
 : "${repo_base:=https://github.com/SFSLiveBoot}"
 
 : "${kver:=4.15.4}"
-: "${dist:=stretch}"
+: "${dist:=buster}"
 
 : "${bootstrap_d:=$(readlink -f "bootstrap.d")}"
 : "${build_d:=$(readlink -f "SFSLiveBoot-build.d")}"
 : "${build_lst:=$bootstrap_d/build.lst}"
 : "${lbu:=$(dirname "$0")}"
 : "${output_iso:=$(readlink -f "SFSLiveBoot.iso")}"
-: "${bootstrap_files:=$repo_base/00-root-sfs/releases/download/20180122/00-$dist-min.sfs $repo_base/15-settings-sfs/releases/download/20180122/15-settings.sfs $repo_base/20-scripts-sfs/releases/download/20180122/20-scripts.sfs}"
+: "${bootstrap_base:=$repo_base/LiveBootUtils/releases/download/${dist}-1.0}"
+: "${bootstrap_files:=$bootstrap_base/00-${dist}-min.sfs $bootstrap_base/15-settings.sfs $bootstrap_base/20-scripts.sfs}"
 
 test -n "$SUDO" -o "x$(id -u)" = "x0" || SUDO="sudo"
 run() {
@@ -80,16 +81,32 @@ which mksquashfs || {
   run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install squashfs-tools
 }
 
-echo -n "Testing for wget: "
-if which wget >/dev/null;then
-  echo "ok."
-else
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install wget
-fi
+echo -n "Testing for curl: "
+which curl || {
+  no_curl=1
+  echo -n "Testing for wget: "
+  which wget || no_wget=1
+}
+
+test -z "$no_wget" -o -z "$no_curl" || {
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install curl
+  no_curl=""
+}
 
 echo -n "Downloading bootstrap files.. "
 run mkdir -p "$bootstrap_d"
-(cd "$bootstrap_d"; run wget -c $bootstrap_files)
+for bs_url in $bootstrap_files;do
+  bs_dest="$bootstrap_d/${bs_url##*/}"
+  echo -n "Testing bootstrap file: $bs_dest .. "
+  if test -e "$bs_dest";then echo "ok."; else
+    echo "downloading from $bs_url"
+    if test -n "$no_curl";then
+      wget -O "$bs_dest.dl-temp" -c "$bs_url" && mv -v "$bs_dest.dl-temp" "$bs_dest"
+    else
+      curl -o "$bs_dest.dl-temp" -L -C - "$bs_url" && mv -v "$bs_dest.dl-temp" "$bs_dest"
+    fi
+  fi
+done
 echo "ok."
 
 if test -s "$build_lst";then
