@@ -798,23 +798,33 @@ class SFSDirectory(object):
                 yield sfs
 
     def prune_old_sfs(self):
+        to_be_unlinked={}
+        cur_sfs_lst = list(self.backend.walk(pattern='*.sfs', depth=0))
         for old_sfs in self.backend.walk(pattern="*.sfs.OLD*"):
+            if old_sfs.exists:
+                for cur_sfs in cur_sfs_lst:
+                    if os.path.samefile(cur_sfs.path, old_sfs.path):
+                        continue
             try: link_target = old_sfs.symlink_target
             except OSError: pass
             else:
                 if not '/' in link_target:
                     is_current = False
-                    sl = old_sfs.parent_directory.join(link_target)
-                    for cur_sfs in old_sfs.parent_directory.walk(pattern='*.sfs', depth=0):
-                        if os.path.samefile(cur_sfs.path, sl.path):
-                            is_current = True
-                            break
+                    old_tgt = old_sfs.parent_directory.join(link_target)
+                    if old_tgt.exists:
+                        for cur_sfs in old_sfs.parent_directory.walk(pattern='*.sfs', depth=0):
+                            if os.path.samefile(cur_sfs.path, old_tgt.path):
+                                is_current = True
+                                break
                     if not is_current:
-                        info("Unlinking: %s", sl.path)
-                        sl.unlink()
+                        info("Unlinking: %s", old_tgt.path)
+                        to_be_unlinked[old_tgt.path] = old_tgt
             info("Unlinking: %s", old_sfs.path)
-            old_sfs.unlink()
-
+            to_be_unlinked[old_sfs.path] = old_sfs
+        for tgt in to_be_unlinked.values():
+            try: tgt.unlink()
+            except OSError as e:
+                warn("Could not unlink %r: %s", tgt.path, e)
 
 class SFSDirectoryAufs(SFSDirectory):
     def __init__(self, backend='/'):
