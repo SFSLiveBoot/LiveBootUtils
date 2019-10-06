@@ -284,6 +284,11 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
 
         class MountEntry(TemplatedString):
             template = "lxc.mount.entry = %(src_esc)s %(dst)s none %(opts)s 0 0"
+            ro = False
+
+            @cached_property
+            def src(self):
+                raise AttributeError("src property needs to be set")
 
             @cached_property
             def src_esc(self):
@@ -311,6 +316,9 @@ lxc.network.flags = up
 %(gw_cfg)s
 lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
             veth_up_script = os.environ.get("LXC_VETH_UP_SCRIPT", 'iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off')
+            link = None
+            ip = None
+            gw = None
 
             @cached_property
             def link_cfg(self):
@@ -335,6 +343,8 @@ lxc.net.%(netnum)d.flags = up
 lxc.net.%(netnum)d.link = %(link)s
 %(ip_cfg)s
 %(gw_cfg)s"""
+            ip = None
+            gw = None
 
             @cached_property
             def ip_cfg(self):
@@ -344,8 +354,8 @@ lxc.net.%(netnum)d.link = %(link)s
             def gw_cfg(self):
                 return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s" if lxc_v3 else "lxc.network.ipv4.gateway = %(gw)s") % self) if self.gw else ""
 
-            def __init__(self, link, ip=None, gw=None):
-                TemplatedString.__init__(self, link=link, ip=ip, gw=gw)
+            def __init__(self, link, ip=None, gw=None, netnum=0):
+                TemplatedString.__init__(self, link=link, ip=ip, gw=gw, netnum=netnum)
 
         def __init__(self, name, **attrs):
             self.name = name
@@ -397,7 +407,7 @@ lxc.net.%(netnum)d.link = %(link)s
     def get_status(self):
         status = run_command(["lxc-info", "-n", self.name], as_user="root")
         ret = {}
-        last_link=None
+        last_link = {}
         for line in status.strip().split("\n"):
             k, v = line.split(":", 1)
             v=v.strip()
@@ -407,7 +417,7 @@ lxc.net.%(netnum)d.link = %(link)s
             elif k.startswith(" "):
                 last_link[k[1:]]=v
             else:
-                last_link=None
+                last_link = {}
                 ret[k]=v
         return ret
 
@@ -1353,7 +1363,7 @@ class SFSFile(FSPath):
         return struct.unpack("<L", header[8:12])[0]
 
     @cached_property
-    def mounted_path(self):
+    def mounted_path(self): # pylint: disable=method-hidden
         ldev = self.loop_dev
         if ldev is None: return
         mentry = global_mountinfo.find_dev(ldev)
@@ -1365,9 +1375,9 @@ class SFSFile(FSPath):
         try: git_source = self.open_file(self.GIT_SOURCE_PATH).read().strip()
         except IOError: return
         if '#' in git_source:
-            git_source, self.git_branch = git_source.rsplit('#', 1)
+            git_source, self._git_branch = git_source.rsplit('#', 1)
         else:
-            self.git_branch = None
+            self._git_branch = None
         return git_source
 
     @cached_property
@@ -1378,6 +1388,8 @@ class SFSFile(FSPath):
     @cached_property
     def git_branch(self):
         if self.git_source is None: return
+        try: return self._git_branch
+        except AttributeError: pass
 
         # should be executed quite rarely..
         return self.open_file(self.GIT_SOURCE_PATH).read().strip().rsplit('#', 1)[1]
@@ -1393,7 +1405,7 @@ class SFSFile(FSPath):
             if not self.git_commit == self.git_repo.last_commit:
                 return self.git_repo.last_stamp
         try: self.open_file(self.UPTDCHECK_PATH)
-        except IOError as e:
+        except IOError:
             return self.create_stamp
 
         if self.mounted_path == None:
@@ -1405,7 +1417,7 @@ class SFSFile(FSPath):
             except IOError: pass
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
                         show_output=True, env=run_env)
-        except CommandFailed as e:
+        except CommandFailed:
             return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
 
@@ -1667,6 +1679,10 @@ class BootDirBuilder(FSPath):
     LXC_DEST_ISO_PARENT = "/destdir/iso-parent"
 
     @cached_property
+    def source_list_url(self):
+        raise AttributeError("source_list_url property needs to be set")
+
+    @cached_property
     def source_list(self):
         return SourceList(self.source_list_url)
 
@@ -1721,7 +1737,7 @@ class BootDirBuilder(FSPath):
     @cached_property
     def extra_dirs(self):
         ret = []
-        for sfs_url, sfs_name in self.source_list:
+        for _, sfs_name in self.source_list:
             if not '/' in sfs_name:
                 continue
             sfs_base = os.path.dirname(sfs_name)
@@ -1876,7 +1892,7 @@ def mountpoint_x(dev):
 
 def blkid2mnt(blkid):
     with open("/proc/mounts") as proc_mounts:
-        for a, b, c in map(lambda line: line.split(None, 2), proc_mounts):  # @UnusedVariable
+        for a, b, _ in map(lambda line: line.split(None, 2), proc_mounts):
             try:
                 if mountpoint_x(a)==blkid:
                     return b.replace("\\040", " ")
