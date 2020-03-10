@@ -227,7 +227,7 @@ lxc.kmsg = 0
 
 lxc.loglevel = 1
 """) + """
-lxc.autodev = 1
+lxc.autodev = %(autodev)s
 lxc.mount.auto = proc sys
 lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(sfs_parts)s"'
 
@@ -243,6 +243,10 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
                 return ""
             return "\n".join(["lxc.cgroup.devices.deny = a"] + map(
                 lambda d: "lxc.cgroup.devices.allow = %s" % d, self.devices_allow))
+
+        @cached_property
+        def autodev(self):
+            return os.environ.get("LXC_AUTODEV", "1")
 
         @cached_property
         def devices_allow(self):
