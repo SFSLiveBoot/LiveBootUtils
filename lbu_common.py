@@ -1338,7 +1338,7 @@ class SFSFile(FSPath):
         if not os.path.isfile(self.path): return False
         return self.open().read(4)=="hsqs"
 
-    fn_ts_re = re.compile(r'^(.+?)(?:(\.OLD)?\.([0-9]+))+$')
+    fn_ts_re = re.compile(r'^(.+?)(?:(\.OLD)?\.([0-9]+))+(?: \(deleted\))?$')
 
     def curlink_sfs(self, prefer_newlink=True):
         """prefer_newlink: prefer current properly named symlink over actually same file"""
