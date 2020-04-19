@@ -2084,6 +2084,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
         source_dir = SFSDirectory(source_dir)
     target_dirs=map(SFSDirectory, target_dirs)
     if not target_dirs: target_dirs=(SFSDirectoryAufs(), )
+    skip_sfs = set(os.environ.get("SFS_UPDATE_SKIP", "").split(","))
     for target_dir in target_dirs:
         last_dir=None
         target_dir_all_sfs = target_dir.all_sfs
@@ -2099,6 +2100,9 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                     info("Skipping non-local symlink: %s -> %s", sfs.basename, sfs.symlink_target)
                     continue
             except OSError: pass
+            if sfs.basename.strip_down() in skip_sfs:
+                info("Skipping ('%s' listed in $SFS_UPDATE_SKIP)", sfs.basename.strip_down())
+                continue
             if source_dir=='--list':
                 print sfs.path
                 continue
