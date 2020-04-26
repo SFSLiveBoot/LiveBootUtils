@@ -783,7 +783,7 @@ class SFSDirectory(object):
 
     def __init__(self, backend):
         if isinstance(backend, basestring):
-            if os.path.isdir(backend):
+            if os.path.isdir(backend) or backend.startswith('http://') or backend.startswith('https://'):
                 backend = FSPath(backend, walk_pattern="*.sfs")
             elif os.path.isdir(os.path.dirname(backend)):
                 backend = FSPath(os.path.dirname(backend),
@@ -870,7 +870,7 @@ class FSPath(object):
     walk_depth = None
     walk_pattern = "*"
     walk_exclude = []
-    _os_walk = staticmethod(os.walk)
+    _walk_func = staticmethod(os.walk)
     _remove_on_del = False
 
     def __new__(cls, path, **attrs):
@@ -881,7 +881,7 @@ class FSPath(object):
         if isinstance(path, basestring) and (path.startswith('http://') or path.startswith('https://')):
             cls = type('%s_url' % (cls.__name__,), (cls,), dict(
                 file_size=cached_property(cls._url_file_size),
-                open=cls._url_open,
+                open=cls._url_open, _walk_func=cls._url_walk
             ))
         return super(FSPath, cls).__new__(cls, path, **attrs)
 
@@ -948,6 +948,26 @@ class FSPath(object):
     def _url_open(self, mode="rb"):
         return urllib2.urlopen(self.path)
 
+    _href_re = re.compile(r'<a\b[^>]*\bhref=([^\s>]+)[^>]*>')
+    _proto_re = re.compile(r'^\w+:')
+    def _url_walk(self, path):
+        resp = urllib2.urlopen(path)
+        if not resp.code == 200:
+            raise BadArgumentsError("Status code not OK: %s %s" % (resp.code, resp.msg))
+        if not resp.headers.type == "text/html":
+            raise BadArgumentsError("not text/html: %r"%(resp.type))
+        dir_names = []
+        file_names = []
+        for href in self._href_re.findall(resp.read()):
+            if href.startswith('"') or href.startswith("'"):
+                href = href[1:-1]
+            if href.startswith('/') or href == "." or href == ".." or self._proto_re.match(href):
+                continue
+            if href.endswith('/'): dir_names.append(href)
+            else : file_names.append(href)
+        yield path, dir_names, file_names
+
+
     def makedirs(self, mode=0755, sudo=False):
         if not self.exists:
             if sudo:
@@ -968,7 +988,7 @@ class FSPath(object):
             exclude = exclude.split(",")
         if file_class is None: file_class=FSPath
         if depth is None: depth=self.walk_depth
-        for d, dn, fn in self._os_walk(self.path):
+        for d, dn, fn in self._walk_func(self.path):
             if depth is not None and d.count('/') - self.path.count('/') == depth:
                 dn[:] = []
             if not self.walk_hidden:
