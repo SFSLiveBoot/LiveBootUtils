@@ -52,7 +52,38 @@ done
 
 test -z "$show_only" || exit 0
 
-if test -z "$DESTDIR" && (echo "Type 'exit 0' to build, 'exit 1' to cancel"; cd "$sfs_src"; env DESTDIR="$sfs_src" debian_chroot="build-apt-sfs" bash );then
+add_sfs_builder() {
+  local target="$1" sfs_d="$1/usr/src/sfs.d"
+  test -d "$target" || { echo "Usage: add_sfs_builder <destdir> <pkgs..>" >&2 ; return 1; }
+  shift
+  mkdir -p "$sfs_d"
+  for pkg; do echo "$pkg" >>"$sfs_d/.pkgs";done
+  cat >"$sfs_d/.common.sh" <<"EOF"
+#!/bin/sh
+
+: "${lbu:=/opt/LiveBootUtils}"
+. "$lbu/scripts/common.func"
+
+: "${pkgs:=$(sed -Ee 's/(^|[[:space:]])#.*//' "$(dirname "$0")/.pkgs" | grep -v '^$' | tr '\n' ' ')}"
+EOF
+  cat >"$sfs_d/10-install-pkgs.sh" <<"EOF"
+#!/bin/sh
+
+set -e
+. "$(dirname "$0")/.common.sh"
+
+"$lbu/scripts/apt-sfs.sh" "$DESTDIR" $pkgs
+EOF
+  chmod +x "$sfs_d/10-install-pkgs.sh"
+}
+
+confirm_shell() {
+  local target="$1" name="$2"
+  echo "Type 'exit 0' to build, 'exit 1' to cancel";
+  (cd "$target"; exec env DESTDIR="$target" debian_chroot="build-${name:-apt-sfs}" bash)
+}
+
+if test -z "$DESTDIR" && add_sfs_builder "$sfs_src" "$@" && confirm_shell "$sfs_src" "$(basename "$out_sfs" .sfs)";then
   out_sfs_tmp="$out_sfs.NEW.$(date +%s)"
   mksquashfs "$sfs_src" "$out_sfs_tmp"
   unsquashfs -s "$out_sfs_tmp" >/dev/null
