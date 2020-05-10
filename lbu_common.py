@@ -721,8 +721,18 @@ class SFSBuilder(object):
             args["env"] = self.run_env
         return self.lxc.run(cmd, **args)
 
+    def build_shell(self):
+        try:
+            run_command(["bash", "--rcfile", self.SFS_BUILD_PROFILE_SH, "-i"], cwd=self.dest_dir.path, show_output=True,
+                        env=dict(self.run_env, sfs_build_target=self.target.basename, DESTDIR=self.dest_dir.path))
+        except CommandFailed as e:
+            warn("Build aborted from shell (exit status: %s)", e[1])
+            raise BuildAborted()
+
     def build(self):
         apt_updated = False
+        if os.environ.get("PRE_BUILD_SHELL"):
+            self.build_shell()
         if "PRE_BUILD_SCRIPT" in self.run_env:
             run_command(["sh", "-c", self.run_env["PRE_BUILD_SCRIPT"], "_build.sh", self.dest_dir.path, self.lxc.name],
                         as_user="root", show_output=True, env=self.run_env)
@@ -748,12 +758,9 @@ class SFSBuilder(object):
             warn("No scripts found and no source given. No modifications will happen by default.")
             if sys.stdin.isatty():
                 info("Modify $DESTDIR using interactive shell.")
-                try:
-                    run_command(["bash", "--rcfile", self.SFS_BUILD_PROFILE_SH, "-i"], cwd=self.dest_dir.path, show_output=True,
-                                env=dict(self.run_env, sfs_build_target=self.target.basename, DESTDIR=self.dest_dir.path))
-                except CommandFailed as e:
-                    warn("Modification aborted (exit status: %s)", e[1])
-                    raise BuildAborted()
+                self.build_shell()
+        if os.environ.get("POST_BUILD_SHELL"):
+            self.build_shell()
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
