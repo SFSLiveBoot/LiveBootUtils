@@ -5,6 +5,9 @@ set -e
 
 : "${kver:=4.15.4}"
 : "${dist:=buster}"
+: "${root_name:=$dist-gnome}"
+: "${main_sfs:=15-settings 20-scripts 40-user}"
+: "${sfs_dir:=linux}"
 
 : "${bootstrap_d:=$(readlink -f "bootstrap.d")}"
 : "${build_d:=$(readlink -f "SFSLiveBoot-build.d")}"
@@ -115,10 +118,11 @@ else
   echo -n "Creating ${build_lst}.. "
   cat >"$build_lst" <<EOF
 * $repo_base
-00-$dist-gnome.sfs              00-root-sfs.git#$dist
-15-settings.sfs                 15-settings-sfs.git
-20-scripts.sfs                  20-scripts-sfs.git
-40-user.sfs                     40-user-sfs.git
+${root_pkgs:+pkgs=$root_pkgs
+stage2_pkgs=}
+00-$root_name.sfs              00-root-sfs.git#$dist
+$(for sfs in $main_sfs;do echo $sfs.sfs $sfs-sfs.git;done)
+${add_sfs:+$add_sfs}
 x86_64/10-kernel-${kver}.sfs    10-kernel-srcbuild-sfs/releases/download/v${kver}-1/10-kernel-${kver}.sfs
 EOF
   echo "ok."
@@ -128,4 +132,4 @@ run cd "$bootstrap_d"
 IFS="
 "
 run $SUDO env $(env | grep -i -e '^[^=]*_proxy=' -e '^lxc_' -e '^lbu_' -e '^ssh_auth_sock=' -e '^boot_') SFS_FIND_PATH="$bootstrap_d" \
-  $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" linux "$output_iso"
+  $PYTHON "$lbu/lbu_cli.py" build-boot-dir "$build_d" "$build_lst" "$sfs_dir" "$output_iso"
