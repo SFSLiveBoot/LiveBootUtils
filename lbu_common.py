@@ -1689,6 +1689,7 @@ class SourceList(FSPath):
                 self.arch = kernel_m.group("arch")
                 self.kver = KVer(kernel_m.group('kver'))
             yield (sfs_source_url, sfs_name.lstrip('/'))
+            self.run_env = {}
 
 
 class BootDirBuilder(FSPath):
