@@ -502,6 +502,10 @@ lxc.net.%(netnum)d.link = %(link)s
                 __import__("pdb").set_trace()
             raise
 
+    def apt_install(self, packages):
+        self.run(
+            ["sh", "-c", 'dpkg -s "$@" >/dev/null || apt-get update && apt-get install -y "$@"', '_']+packages, show_output=True)
+
     def run(self, cmd, **args):
         if not self.is_running:
             self.start()
@@ -1653,7 +1657,7 @@ class SourceList(FSPath):
     url_re = re.compile(r'^[a-z+]+://', re.I)
 
     @cached_property
-    def run_env(self):
+    def run_env(self): # pylint: disable=method-hidden
         return {}
 
     def __iter__(self):
@@ -1709,6 +1713,9 @@ class BootDirBuilder(FSPath):
     LXC_MKRD_DIR = "/usr/src/make-ramdisk"
     LXC_DEST_BOOTDIR = "/destdir/bootdir"
     LXC_DEST_ISO_PARENT = "/destdir/iso-parent"
+
+    mkrd_pkgs = os.environ.get("LBU_MKRD_PKGS", "make binutils udev klibc-utils lvm2 kmod cryptsetup-run busybox pciutils fakeroot cpio").split()
+    grub_pkgs = os.environ.get("LBU_GRUB_PKGS", "grub2-common grub-efi-amd64-bin grub-pc-bin mtools xorriso").split()
 
     @cached_property
     def source_list_url(self):
@@ -1800,7 +1807,10 @@ class BootDirBuilder(FSPath):
         if self.iso_output:
             self.dist_dir.prune_old_sfs()
             lxc_iso = FSPath(self.LXC_DEST_ISO_PARENT).join(FSPath(self.iso_output).basename).path
-            self.build_lxc.run(["grub-mkrescue", "-o", lxc_iso, self.LXC_DEST_BOOTDIR], show_output=True)
+            if self.grub_pkgs:
+                self.build_lxc.apt_install(self.grub_pkgs)
+            self.build_lxc.run(
+                ["grub-mkrescue", "-o", lxc_iso, self.LXC_DEST_BOOTDIR], show_output=True)
 
     def build_sfs(self):
         info("Building sfs files to %s", self.dist_dirname)
@@ -1853,6 +1863,8 @@ class BootDirBuilder(FSPath):
         lxc_grub_dir = "%s%s" % (self.LXC_DEST_BOOTDIR, grub_prefix)
         lxc_efi_src = "/usr/lib/grub/%s" % (self.efi_arch,)
 
+        if self.grub_pkgs:
+            self.build_lxc.apt_install(self.grub_pkgs)
         self.build_lxc.run(["cp", "-r", lxc_efi_src, lxc_grub_dir])
         self.build_lxc.run(["grub-mkimage", "-o", lxc_efi_img, "-O", self.efi_arch, "-p", grub_prefix] + self.efi_mods)
 
@@ -1863,7 +1875,10 @@ class BootDirBuilder(FSPath):
         if "RAMDISK_DESTDIR" not in makeargs:
             makeargs["RAMDISK_DESTDIR"] = "%s/" % (self.LXC_DEST_ARCH,)
         self.arch_dir.makedirs()
-        cmd = ["make", "-C", self.LXC_MKRD_DIR] + map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
+        if self.mkrd_pkgs:
+            self.build_lxc.apt_install(self.mkrd_pkgs)
+        cmd = ["make", "-C", self.LXC_MKRD_DIR] + \
+            map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
         self.build_lxc.run(cmd, env=self.run_env, show_output=True)
 
 
