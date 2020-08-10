@@ -442,7 +442,7 @@ lxc.net.%(netnum)d.link = %(link)s
         return cls(name, **attrs)
 
     @classmethod
-    def from_sfs(cls, name, sfs_parts, bind_dirs=None, veth=None, vlan=None, **attrs):
+    def from_sfs(cls, name, sfs_parts, bind_dirs=None, veth=None, vlan=None, nonet=False, **attrs):
         all_parts = attrs["all_parts"] = []
         for part in sfs_parts:
             if isinstance(part, FSPath):
@@ -469,7 +469,7 @@ lxc.net.%(netnum)d.link = %(link)s
         cfg = LXC.Config(name, sfs_parts=" ".join(map(lambda p: p.realpath().path, all_parts)))
         if "devices_allow" in attrs:
             cfg.devices_allow = attrs.pop("devices_allow")
-        if veth is None and vlan is None:
+        if veth is None and vlan is None and not nonet:
             cfg.add_hostnet()
         else:
             if veth is not None:
@@ -2260,8 +2260,8 @@ def aufs_update_branch(mnt, aufs="/"):
 
 
 @cli_func(desc='Run LXC instance. bind is space-separated entries of <src_dir>=<dst_dir>[:ro]')
-def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None, devs=None):
-    args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init])
+def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None, devs=None, nonet=False):
+    args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init], nonet=nonet)
     if vlan is not None:
         args["vlan"] = map(lambda v: v.split(":"), vlan.split(" "))
     if veth is not None:
