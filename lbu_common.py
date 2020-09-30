@@ -788,6 +788,8 @@ class SFSBuilder(object):
 
 
 class SFSDirectory(object):
+    sfs_search_depth = int(os.environ.get("SFS_SEARCH_DEPTH", "3"))
+
     @repr_wrap
     def __repr__(self):
         return str(self.backend)
@@ -807,7 +809,7 @@ class SFSDirectory(object):
 
     @cached_property
     def all_sfs(self):
-        return list(sorted(self.backend.walk(file_class=SFSFile), key=lambda s: s.basename))
+        return list(sorted(self.backend.walk(file_class=SFSFile, depth=self.sfs_search_depth), key=lambda s: s.basename))
 
     def join(self, *args, **kwargs):
         return self.backend.join(*args, **kwargs)
