@@ -23,15 +23,17 @@ run() {
   "$@"
 }
 
-echo -n "Testing for aufs: "
-if grep -qw aufs /proc/filesystems;then
+echo -n "Testing for aufs/overlay: "
+if grep -qw -e aufs -e overlay /proc/filesystems;then
   echo ok
 else
   echo -n "(trying to load module..) "
   if run $SUDO modprobe aufs;then
-    echo "ok"
+    echo "ok (aufs)"
+  elif run $SUDO modprobe overlay;then
+    echo "ok (overlay)"
   else
-    echo "ERROR: cannot continue: no aufs support"
+    echo "ERROR: cannot continue: no aufs/overlay support"
     exit 1
   fi
 fi
