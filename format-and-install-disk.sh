@@ -7,6 +7,7 @@ trap_fail
 
 : ${drive:=$1}
 : ${fs_type:=fat32}
+: ${part_max:=100%}
 
 test -n "$drive" -a -e "$drive" || {
   show_info "Usage: $(basename "$0") /dev/sd[a-z] . Use 'blkid -o list' to get mounted info, and 'cat /proc/partitions' to see all drives"
@@ -31,7 +32,7 @@ test -n "$MKFS_PROG" ||
   esac
 
 if test -z "$part2_start"; then
-  part1_end="100%"
+  part1_end="$part_max"
 else
   part1_end="$part2_start"
 fi
@@ -42,7 +43,7 @@ wipefs -a "$drive"
 parted "$drive" mklabel msdos
 parted "$drive" mkpart primary $fs_type 2048s $part1_end
 parted "$drive" toggle 1 boot
-test -z "$part2_start" || parted "$drive" mkpart primary $fs_type $part2_start 100%
+test -z "$part2_start" || parted "$drive" mkpart primary $fs_type $part2_start $part_max
 
 udevadm settle
 blockdev --rereadpt "$drive"
