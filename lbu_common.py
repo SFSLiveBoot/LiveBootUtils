@@ -504,7 +504,7 @@ lxc.net.%(netnum)d.link = %(link)s
 
     def apt_install(self, packages):
         self.run(
-            ["sh", "-c", 'dpkg -s "$@" >/dev/null || apt-get update && apt-get install -y "$@"', '_']+packages, show_output=True)
+            ["sh", "-x", "-c", 'dpkg -s "$@" >/dev/null || (apt-get update || apt-get update && apt-get install -y "$@" )', '_']+packages, show_output=True)
 
     def run(self, cmd, **args):
         if not self.is_running:
