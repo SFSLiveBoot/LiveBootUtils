@@ -197,6 +197,14 @@ class LXC(object):
     init_cmd = []
 
     class BindEntry(object):
+        @classmethod
+        def from_strdef(cls, s):
+            src, dst = s.split('=', 1)
+            if dst.endswith(':ro'):
+                dst, ro = dst[:-3], True
+            else:
+                ro = False
+            return cls(src, dst, ro)
         def __init__(self, src, dst, ro=False):
             if isinstance(src, FSPath):
                 src = src.path
@@ -683,13 +691,17 @@ class SFSBuilder(object):
         return ret
 
     @cached_property
+    def bind_dirs(self):
+        return [
+            LXC.BindEntry(self.dest_dir, self.LXC_DESTDIR),
+            LXC.BindEntry(dl.cache_dir, self.LXC_DL_CACHE),
+            LXC.BindEntry(self.lbu_d, self.LXC_LBU, True),
+        ] + map(lambda (h, l): LXC.BindEntry(h, l), self.deb_mappings)
+
+    @cached_property
     def lxc(self):
         lxc = LXC.from_sfs(self.name, self.lxc_parts + map(lambda d: d.path, [self.lxc_setup_d, self.lxc_rw_d]),
-                           [
-                               LXC.BindEntry(self.dest_dir, self.LXC_DESTDIR),
-                               LXC.BindEntry(dl.cache_dir, self.LXC_DL_CACHE),
-                               LXC.BindEntry(self.lbu_d, self.LXC_LBU, True),
-                           ] + map(lambda (h, l): LXC.BindEntry(h, l), self.deb_mappings),
+                           self.bind_dirs,
                            init_cmd=self.LXC_INIT_CMD, auto_remove=True)
         return lxc
 
@@ -1482,6 +1494,10 @@ class SFSFile(FSPath):
 
     def rebuild_and_replace(self, source=None, env=None):
         builder = SFSBuilder(self, source)
+        extra_binds = os.environ.get("BUILD_EXTRA_BINDS")
+        if extra_binds:
+            for bind_def in extra_binds.split(" "):
+                builder.bind_dirs.append(LXC.BindEntry.from_strdef(bind_def))
         if env is not None:
             builder.run_env.update(**env)
         builder.build()
