@@ -226,6 +226,7 @@ class LXC(object):
 lxc.uts.name = %(name)s
 lxc.rootfs.path = %(rootfs)s
 lxc.pty.max = 1024
+%(apparmor_cfg)s
 
 lxc.log.level = 1""" if lxc_v3 else """
 lxc.utsname = %(name)s
@@ -244,6 +245,14 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
 %(dev_cfg)s
 %(extra_config)s
         """
+
+        @cached_property
+        def apparmor_profile(self):
+            return os.environ.get("LXC_APPARMOR_PROFILE", "unconfined")
+
+        @cached_property
+        def apparmor_cfg(self):
+            return "lxc.apparmor.profile = %s" % (self.apparmor_profile) if os.path.exists("/sys/kernel/security/apparmor") else ""
 
         @cached_property
         def dev_cfg(self):
