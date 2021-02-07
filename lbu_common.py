@@ -1110,7 +1110,10 @@ class FSPath(object):
         new_name="%s.%s"%(self.path, int(change_stamp))
         os.rename(temp_filename, new_name)
         try:
-            os.symlink(os.path.basename(new_name), self.path)
+            if os.environ.get("NO_SFS_SYMLINKS") or self.parent_directory.join(".nolinks").exists:
+                os.rename(new_name, self.path)
+            else:
+                os.symlink(os.path.basename(new_name), self.path)
         except OSError as e:
             if e.errno == errno.EPERM:
                 os.rename(new_name, self.path)
