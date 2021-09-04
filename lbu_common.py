@@ -9,7 +9,7 @@ import urllib2
 import datetime
 import pwd
 
-from Crypto.Hash import MD5
+import hashlib
 from logging import warn, info, debug
 
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
@@ -1332,7 +1332,7 @@ class Downloader(object):
         if dest_dir is None:
             dest_dir = self.cache_dir
         if fname is None:
-            fname = "%s-%s" % (MD5.new(source).hexdigest()[:8], os.path.basename(source))
+            fname = "%s-%s" % (hashlib.md5(source).hexdigest()[:8], os.path.basename(source))
             if fname.endswith('.git'):
                 fname = fname[:-4]
         dest = os.path.join(dest_dir, fname)
