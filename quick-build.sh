@@ -4,7 +4,7 @@ set -e
 : "${repo_base:=https://github.com/SFSLiveBoot}"
 
 : "${kver:=4.15.4}"
-: "${dist:=buster}"
+: "${dist:=bullseye}"
 : "${root_name:=$dist-gnome}"
 : "${main_sfs:=15-settings 20-scripts 40-user}"
 : "${sfs_dir:=linux}"
@@ -19,8 +19,20 @@ set -e
 
 test -n "$SUDO" -o "x$(id -u)" = "x0" || SUDO="sudo"
 run() {
-  echo "Running:$(for a in "$@";do case "$a" in *[^A-Za-z0-9_./=:-]*|"") echo -n " '$a'";;*) echo -n " $a";;esac;done)" >&2
-  "$@"
+  (set -x; exec "$@")
+}
+
+dl_file() {
+  local url="$1" dst="$2"
+  if test -n "$no_curl";then
+    wget -O "$dst" -c "$url"
+  else
+    curl -sSfL -o "$dst" -C - "$url"
+  fi
+}
+
+inst_pkg() {
+  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install "$@"
 }
 
 echo -n "Testing for aufs/overlay: "
@@ -42,7 +54,7 @@ echo -n "Testing for git: "
 if which git >/dev/null;then
   echo "ok."
 else
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install git
+  inst_pkg git
 fi
 
 echo -n "Testing for LiveBootUtils: "
@@ -58,13 +70,15 @@ if test -d "$lbu/.git";then
   (cd "$lbu"; run git pull)
 fi
 
-echo -n "Testing for python: "
-if PYTHON=$(which python2);then
-  $PYTHON -V
-else
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install python python-crypto
-  PYTHON="$(which python2)"
-fi
+test -n "$PYTHON" || {
+  echo -n "Testing for python: "
+  if PYTHON=$(which python2);then
+    $PYTHON -V
+  else
+    inst_pkg python2
+    PYTHON="$(which python2)"
+  fi
+}
 
 echo -n "Testing for LXC: "
 if which lxc-start >/dev/null;then
@@ -78,13 +92,11 @@ else
       esac;;
     *) lxc_pkg=lxc;;
   esac
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get ${lxc_repo:+-t $lxc_repo} -y install $lxc_pkg
+  inst_pkg ${lxc_repo:+-t $lxc_repo} $lxc_pkg
 fi
 
 echo -n "Testing mksquashfs: "
-which mksquashfs || {
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install squashfs-tools
-}
+which mksquashfs || inst_pkg squashfs-tools
 
 echo -n "Testing for curl: "
 which curl || {
@@ -94,7 +106,7 @@ which curl || {
 }
 
 test -z "$no_wget" -o -z "$no_curl" || {
-  run $SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y install curl
+  inst_pkg curl
   no_curl=""
 }
 
@@ -105,10 +117,21 @@ for bs_url in $bootstrap_files;do
   echo -n "Testing bootstrap file: $bs_dest .. "
   if test -e "$bs_dest";then echo "ok."; else
     echo "downloading from $bs_url"
-    if test -n "$no_curl";then
-      wget -O "$bs_dest.dl-temp" -c "$bs_url" && mv -v "$bs_dest.dl-temp" "$bs_dest"
+    if dl_file "$bs_url" "$bs_dest.dl-temp";then
+      mv -v "$bs_dest.dl-temp" "$bs_dest"
     else
-      curl -o "$bs_dest.dl-temp" -L -C - "$bs_url" && mv -v "$bs_dest.dl-temp" "$bs_dest"
+      case "$bs_dest" in
+        */00-*)
+          root_tmp="$($SUDO mktemp -d -t $dist-root.XXXX)"
+          $SUDO which debootstrap >/dev/null || inst_pkg debootstrap
+          run $SUDO debootstrap "$dist" "$root_tmp"
+          run $SUDO mksquashfs "$root_tmp" "$bs_dest"
+          run $SUDO rm -rf "$root_tmp"
+        ;;
+        *)
+          run $SUDO $PYTHON "$lbu/lbu_cli.py" rebuild-sfs "$bs_dest" "$repo_base/$(basename "$bs_url" .sfs)-sfs.git"
+        ;;
+      esac
     fi
   fi
 done
@@ -130,7 +153,7 @@ EOF
   echo "ok."
 fi
 
-run cd "$bootstrap_d"
+cd "$bootstrap_d"
 IFS="
 "
 run $SUDO env $(env | grep -i -e '^[^=]*_proxy=' -e '^lxc_' -e '^lbu_' -e '^ssh_auth_sock=' -e '^boot_') SFS_FIND_PATH="$bootstrap_d" \
