@@ -170,7 +170,7 @@ class CLIProgressReporter(object):
 
 pr_cls = CLIProgressReporter
 try:
-    lxc_v3 = os.popen('lxc-info --version').read().split('.')[0]=='3'
+    lxc_v3 = os.popen('lxc-info --version').read().split('.')[0] in ('3', '4')
 except OSError as e:
     warn("Cannot get LXC version: %s", e)
 
