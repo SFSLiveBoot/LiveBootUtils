@@ -618,6 +618,8 @@ class SFSBuilder(object):
             try: self.run_env.update(_load_build_env(target_sfs.open_file(self.BUILD_ENV_PATH).read()))
             except IOError: pass
         if isinstance(source, basestring):
+            if source.startswith("file://"):
+                source = source[7:]
             if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
                 source = GitRepo(source)
             else:
