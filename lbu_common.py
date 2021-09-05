@@ -634,7 +634,7 @@ class SFSBuilder(object):
     def dest_base(self):
         dest_base = FSPath(os.path.join(self.dest_dir_parent, self.name), auto_remove=True)
         if not dest_base.exists:
-            os.makedirs(dest_base.path, 0755)
+            os.makedirs(dest_base.path, 0o755)
         return dest_base
 
     @cached_property
@@ -1004,7 +1004,7 @@ class FSPath(object):
         yield path, dir_names, file_names
 
 
-    def makedirs(self, mode=0755, sudo=False):
+    def makedirs(self, mode=0o755, sudo=False):
         if not self.exists:
             if sudo:
                 run_command(["mkdir", "-m", oct(mode), "-p", self.path], as_user="root")
@@ -1094,7 +1094,7 @@ class FSPath(object):
 
     def open_file(self, path, mode="rb"):
         if not self.exists and mode[:1] in "wa":
-            os.makedirs(self.path, 0755)
+            os.makedirs(self.path, 0o755)
         return open(os.path.join(self.path, path.lstrip("/")), mode)
 
     @property
@@ -1258,7 +1258,7 @@ class Downloader(object):
     def cache_dir(self):
         cache_dir = os.environ.get("dl_cache_dir", os.path.join(lbu_cache_dir, "dl"))
         if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir, 0755)
+            os.makedirs(cache_dir, 0o755)
         return cache_dir
 
     def dl_file_git(self, source, dest_path):
@@ -1574,7 +1574,7 @@ class MountPoint(FSPath):
 
     def mount(self, src, *opts, **kwargs):
         if not os.path.exists(self.path):
-            os.makedirs(self.path, 0755)
+            os.makedirs(self.path, 0o755)
         cmd=["mount", src, self.path]
         if kwargs.pop("bind", False):
             cmd.append("--bind")
@@ -2221,7 +2221,7 @@ def build_sfs_dir(dest_dir, source_list, source_url=None):
     for sfs_source_url, sfs_name in sources:
         dest_sfs = SFSFile(path=os.path.join(dest_dir, sfs_name.lstrip('/')))
         if not os.path.exists(dest_sfs.parent_directory.path):
-            os.makedirs(dest_sfs.parent_directory.path, 0755)
+            os.makedirs(dest_sfs.parent_directory.path, 0o755)
         if dest_sfs.exists and not dest_sfs.needs_update:
             info("No change: %s is up to date (%s)", sfs_name, stamp2txt(dest_sfs.create_stamp))
             continue
