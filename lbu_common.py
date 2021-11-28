@@ -512,7 +512,9 @@ lxc.net.%(netnum)d.link = %(link)s
             cmd.append("--")
             cmd.extend(init)
         try:
-            return run_command(cmd, as_user="root")
+            return run_command(cmd, as_user="root", env=dict(
+                map(lambda k: (k, os.environ[k]),
+                    filter(lambda k: k.startswith("LXC_"), os.environ.keys()))))
         except CommandFailed as e:
             warn("Starting LXC instance %r failed: %r", self.name, e)
             if sys.stdin.isatty():
@@ -672,6 +674,7 @@ class SFSBuilder(object):
 
     @cached_property
     def lxc_rw_d(self):
+        if os.environ.get("LXC_RW_D"): return FSPath(os.environ["LXC_RW_D"])
         d = MountPoint(self.dest_base.join("lxc-rw"), auto_remove=True)
         if d.is_mounted: return d
         d.mount("lxc-rw", fs_type="tmpfs", mode="0755")
@@ -1649,8 +1652,13 @@ class MountPoint(FSPath):
                     part.mount()
                 part = part.mounted_path
             dirs.append(part.path)
-        rw_mount = MountPoint(FSPath(lbu_cache_dir).join("comnt-rw-%s-%s"%(os.getpid(), time.time())))
-        rw_mount.mount("comnt-rw", fs_type="tmpfs", mode="0755")
+        if os.environ.get("LXC_RW_D"):
+            rw_mount = FSPath(os.environ["LXC_RW_D"])
+            try: dirs.remove(rw_mount.path)
+            except ValueError: pass
+        else:
+            rw_mount = MountPoint(FSPath(lbu_cache_dir).join("comnt-rw-%s-%s"%(os.getpid(), time.time())))
+            rw_mount.mount("comnt-rw", fs_type="tmpfs", mode="0755")
         kwargs.setdefault("fs_type", self.default_combined_fs_type)
         if kwargs["fs_type"] == "aufs":
             dirs_arg = ":".join(["%s=rw" % (rw_mount.path,)] + map(lambda d: "%s=ro" % (d,), reversed(dirs)))
