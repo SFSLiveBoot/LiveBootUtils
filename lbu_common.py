@@ -646,7 +646,10 @@ class SFSBuilder(object):
         if self.source is None:
             dest_dir.mount_combined([self.target])
             return dest_dir
-        dest_dir.mount("destdir", fs_type="tmpfs", mode="0755")
+        if os.environ.get("LXC_DESTDIR"):
+            dest_dir = FSPath(os.environ["LXC_DESTDIR"])
+        else:
+            dest_dir.mount("destdir", fs_type="tmpfs", mode="0755")
         if self.source is not None:
             if not isinstance(self.source, GitRepo):
                 raise ValueError("Source is not GitRepo")
