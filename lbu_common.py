@@ -619,6 +619,8 @@ class SFSBuilder(object):
             source = target_sfs.git_source
             try: self.run_env.update(_load_build_env(target_sfs.open_file(self.BUILD_ENV_PATH).read()))
             except IOError: pass
+            if source and target_sfs.git_branch and not "#" in source and urllib2.splittype(source)[0] in ("https", "http", "git"):
+                source = "%s#%s"%(source, target_sfs.git_branch)
         if isinstance(source, basestring):
             if source.startswith("file://"):
                 source = source[7:]
