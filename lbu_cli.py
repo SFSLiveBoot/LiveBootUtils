@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 from logging import info, warn, error
 import logging
@@ -7,7 +7,7 @@ from lbu_common import cli_func, BadArgumentsError
 
 logging.getLogger().setLevel(logging.INFO)
 
-_log_colors=dict(map(lambda (k,v):  (k, "\033[%sm"%(v,)),dict(blue="34", red="1;31", yellow="33", reset="1;0").items()))
+_log_colors=dict([(k_v[0], "\033[%sm"%(k_v[1],)) for k_v in list(dict(blue="34", red="1;31", yellow="33", reset="1;0").items())])
 try: subprocess.check_call(["tty","-s"])
 except subprocess.CalledProcessError: pass
 else:
@@ -23,8 +23,7 @@ if __name__ == '__main__':
     except IndexError:
         warn("Usage: %s [{--debug|--quiet}] <command> [<args..>]", arg0)
         info("Supported commands:%s",
-             "".join(map(lambda (n, f): "\n\t%s\t%s"%(n, getattr(f, "_cli_desc", "")),
-                         sorted(cli_func.commands.iteritems()))))
+             "".join(["\n\t%s\t%s"%(n_f[0], getattr(n_f[1], "_cli_desc", "")) for n_f in sorted(cli_func.commands.items())]))
         raise SystemExit(1)
     if command=='--debug':
         logging.getLogger().setLevel(logging.DEBUG)
@@ -44,8 +43,8 @@ if __name__ == '__main__':
         raise SystemExit(1)
     if ret is not None:
         if isinstance(ret, list):
-            for e in ret: print e
+            for e in ret: print(e)
         elif isinstance(ret, dict):
-            print __import__("json").dumps(ret, indent=True)
+            print(__import__("json").dumps(ret, indent=True))
         else:
-            print ret
+            print(ret)

@@ -5,24 +5,18 @@ import struct, time, functools
 import fnmatch, glob, re
 import fcntl, errno, select
 import subprocess
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 import datetime
 import pwd
 
 import hashlib
 from logging import warn, info, debug
+from functools import reduce
 
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
 lbu_dir = os.path.dirname(__file__)
 
-
-# patch urllib to work with "with" statement
-if hasattr(urllib2, "addinfourl"):
-    if not hasattr(urllib2.addinfourl, '__exit__'):
-        urllib2.addinfourl.__exit__ = lambda u, *args: u.close()
-    if not hasattr(urllib2.addinfourl, '__enter__'):
-        urllib2.addinfourl.__enter__ = lambda u: u
-
+no_exceptions = os.environ.get("LBU_NO_EXCEPTIONS")
 
 class CommandFailed(EnvironmentError): pass
 class BuildAborted(RuntimeError): pass
@@ -64,8 +58,7 @@ def cached_property(fn):
 
 
 def clear_cached_properties(obj):
-    for prop in filter(lambda p: isinstance(p, property) and hasattr(obj, "__cached__" + p.fget.__name__),
-                       map(lambda n: getattr(obj.__class__, n), dir(obj.__class__))):
+    for prop in [p for p in [getattr(obj.__class__, n) for n in dir(obj.__class__)] if isinstance(p, property) and hasattr(obj, "__cached__" + p.fget.__name__)]:
         delattr(obj, prop.fget.__name__)
 
 
@@ -126,7 +119,7 @@ def cli_func(func=None, name=None, parse_argv=None, desc=None):
             debug("Calling: %s(*%r, **%r)", func.__name__, args, kwargs)
             return func(*args, **kwargs)
         except TypeError as e:
-            if e.message.startswith('%s() '%(func.__name__,)):
+            if e.args[0].startswith('%s() '%(func.__name__,)):
                 raise BadArgumentsError(e)
             else: raise
     func.cli_call=cli_call
@@ -134,8 +127,8 @@ def cli_func(func=None, name=None, parse_argv=None, desc=None):
         import inspect
         spec=inspect.getargspec(func)
         rev_args=list(reversed(spec.args))
-        defaults=dict(map(lambda (i, d): (rev_args[i], d), enumerate(reversed(spec.defaults)))) if spec.defaults else {}
-        func.__doc__=" ".join(map(lambda n: "[<%s>=%r]"%(n, defaults[n]) if n in defaults else "<%s>"%n, spec.args)+
+        defaults=dict([(rev_args[i_d[0]], i_d[1]) for i_d in enumerate(reversed(spec.defaults))]) if spec.defaults else {}
+        func.__doc__=" ".join(["[<%s>=%r]"%(n, defaults[n]) if n in defaults else "<%s>"%n for n in spec.args]+
                               (["[<%s>...]"%spec.varargs] if spec.varargs else [])+
                               (["[<%s>=<value>...]"%spec.keywords] if spec.keywords else []))
     return func
@@ -157,13 +150,13 @@ class CLIProgressReporter(object):
 
     def __init__(self, full_size, **attrs):
         self.full_size=full_size
-        self.report_buckets=map(lambda i: i * full_size / self.nr_buckets, range(self.nr_buckets))
-        map(lambda k: setattr(self, k, attrs[k]), attrs)
+        self.report_buckets=[i * full_size / self.nr_buckets for i in range(self.nr_buckets)]
+        list(map(lambda k: setattr(self, k, attrs[k]), attrs))
 
     def __call__(self, sz):
-        if sz is None: print >>self.output_stream, "100%"
+        if sz is None: print("100%", file=self.output_stream)
         elif self.report_buckets and sz>=self.report_buckets[0]:
-            print >>self.output_stream, "%d%%.."%(100 * sz / self.full_size),
+            print("%d%%.."%(100 * sz / self.full_size), end=' ', file=self.output_stream)
             while self.report_buckets and sz>=self.report_buckets[0]:
                 self.report_buckets.pop(0)
         self.output_stream.flush()
@@ -258,8 +251,7 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
         def dev_cfg(self):
             if self.devices_allow is None:
                 return ""
-            return "\n".join(["lxc.cgroup.devices.deny = a"] + map(
-                lambda d: "lxc.cgroup.devices.allow = %s" % d, self.devices_allow))
+            return "\n".join(["lxc.cgroup.devices.deny = a"] + ["lxc.cgroup.devices.allow = %s" % d for d in self.devices_allow])
 
         @cached_property
         def autodev(self):
@@ -452,7 +444,7 @@ lxc.net.%(netnum)d.link = %(link)s
         cmd = ["lxc-create", "-t", "sfs", "-n", name, "--",
                "--default-parts", " ".join(map(str, sfs_parts)), "--host-network"]
         cmd.extend(reduce(lambda a, b: a + ["--bind-ro" if b.ro else "--bind", str(b)], bind_dirs, []))
-        cmd.extend(map(str, extra_parts))
+        cmd.extend(list(map(str, extra_parts)))
         run_command(cmd, as_user="root")
         if "auto_remove" not in attrs:
             attrs["auto_remove"] = True
@@ -483,7 +475,7 @@ lxc.net.%(netnum)d.link = %(link)s
             if isinstance(part, SFSFile):
                 if part.mounted_path is None:
                     part.mount()
-        cfg = LXC.Config(name, sfs_parts=" ".join(map(lambda p: p.realpath().path, all_parts)))
+        cfg = LXC.Config(name, sfs_parts=" ".join([p.realpath().path for p in all_parts]))
         if "devices_allow" in attrs:
             cfg.devices_allow = attrs.pop("devices_allow")
         if veth is None and vlan is None and not nonet:
@@ -513,8 +505,7 @@ lxc.net.%(netnum)d.link = %(link)s
             cmd.extend(init)
         try:
             return run_command(cmd, as_user="root", env=dict(
-                map(lambda k: (k, os.environ[k]),
-                    filter(lambda k: k.startswith("LXC_"), os.environ.keys()))))
+                [(k, os.environ[k]) for k in [k for k in list(os.environ.keys()) if k.startswith("LXC_")]]))
         except CommandFailed as e:
             warn("Starting LXC instance %r failed: %r", self.name, e)
             if sys.stdin.isatty():
@@ -555,16 +546,15 @@ class SFSFinder(object):
         if "SFS_FIND_PATH" in os.environ:
             dirlist = os.environ["SFS_FIND_PATH"].split(":")
         else:
-            dirlist = map(lambda e: FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path,
-                          filter(lambda e: e["fs_type"] == "squashfs", global_mountinfo))
-        return dict(map(lambda p: (p, SFSDirectory(p)), filter(lambda d: os.path.exists(d), uniq_list(dirlist))))
+            dirlist = [FSPath(MountPoint(e["mnt"]).loop_backend).parent_directory.path for e in [e for e in global_mountinfo if e["fs_type"] == "squashfs"]]
+        return dict([(p, SFSDirectory(p)) for p in [d for d in uniq_list(dirlist) if os.path.exists(d)]])
 
     def search_dirs(self, name, sfs_dirs=None):
         sfs_found = []
         if sfs_dirs is None:
-            sfs_dirs = self._sfs_dirs.values()
+            sfs_dirs = list(self._sfs_dirs.values())
         for sfs_dir in sfs_dirs:
-            sfs_found.extend(map(lambda sfs: sfs.curlink_sfs(), sfs_dir.find_all_sfs(name)))
+            sfs_found.extend([sfs.curlink_sfs() for sfs in sfs_dir.find_all_sfs(name)])
         sfs_found.sort(key=lambda sfs: -sfs.create_stamp)
         if sfs_found:
             return sfs_found[0]
@@ -589,7 +579,7 @@ sfs_finder = SFSFinder()
 
 
 def _load_build_env(data):
-    return map(lambda l: l.split("=", 1), filter(lambda v: v, data.split("\n")))
+    return [l.split("=", 1) for l in [v for v in data.split("\n") if v]]
 
 
 class SFSBuilder(object):
@@ -617,11 +607,11 @@ class SFSBuilder(object):
         self.target = target_sfs
         if source is None and target_sfs.exists:
             source = target_sfs.git_source
-            try: self.run_env.update(_load_build_env(target_sfs.open_file(self.BUILD_ENV_PATH).read()))
+            try: self.run_env.update(_load_build_env(target_sfs.open_file(self.BUILD_ENV_PATH, "r").read()))
             except IOError: pass
-            if source and target_sfs.git_branch and not "#" in source and urllib2.splittype(source)[0] in ("https", "http", "git"):
+            if source and target_sfs.git_branch and not "#" in source and urllib.parse.splittype(source)[0] in ("https", "http", "git"):
                 source = "%s#%s"%(source, target_sfs.git_branch)
-        if isinstance(source, basestring):
+        if isinstance(source, str):
             if source.startswith("file://"):
                 source = source[7:]
             if os.path.isdir(source) and os.path.exists(os.path.join(source, ".git")):
@@ -672,8 +662,8 @@ class SFSBuilder(object):
         if d.is_mounted: return d
         d.mount("lxc-setup", fs_type="tmpfs", mode="0755")
         paths = [self.LXC_LBU, self.LXC_DL_CACHE, self.LXC_DESTDIR]
-        paths.extend(map(lambda (h, l): l.lstrip("/"), self.deb_mappings))
-        run_command(["mkdir", "-p"] + map(lambda sd: d.join(sd).path, paths), as_user="root")
+        paths.extend([h_l[1].lstrip("/") for h_l in self.deb_mappings])
+        run_command(["mkdir", "-p"] + [d.join(sd).path for sd in paths], as_user="root")
         run_command(["cp", "--parents", "/etc/resolv.conf", d.path], as_user="root")
         return d
 
@@ -715,11 +705,11 @@ class SFSBuilder(object):
             LXC.BindEntry(self.dest_dir, self.LXC_DESTDIR),
             LXC.BindEntry(dl.cache_dir, self.LXC_DL_CACHE),
             LXC.BindEntry(self.lbu_d, self.LXC_LBU, True),
-        ] + map(lambda (h, l): LXC.BindEntry(h, l), self.deb_mappings)
+        ] + [LXC.BindEntry(h_l1[0], h_l1[1]) for h_l1 in self.deb_mappings]
 
     @cached_property
     def lxc(self):
-        lxc = LXC.from_sfs(self.name, self.lxc_parts + map(lambda d: d.path, [self.lxc_setup_d, self.lxc_rw_d]),
+        lxc = LXC.from_sfs(self.name, self.lxc_parts + [d.path for d in [self.lxc_setup_d, self.lxc_rw_d]],
                            self.bind_dirs,
                            init_cmd=self.LXC_INIT_CMD, auto_remove=True)
         return lxc
@@ -744,7 +734,7 @@ class SFSBuilder(object):
     @property
     def run_env_mod(self):
         ret = self.run_env.copy()
-        for k, v in self._run_env_def.items():
+        for k, v in list(self._run_env_def.items()):
             if k in ret and ret[k] == v:
                 del ret[k]
             elif k not in ret:
@@ -801,8 +791,8 @@ class SFSBuilder(object):
         if self.source is not None:
             git_source_url = self.source.source_url
             if git_source_url is not None:
-                self.dest_dir.open_file(self.GIT_SOURCE_PATH, "wb").write(git_source_url)
-                self.dest_dir.open_file(self.GIT_COMMIT_PATH, "wb").write(self.source.last_commit)
+                self.dest_dir.open_file(self.GIT_SOURCE_PATH, "w").write(git_source_url)
+                self.dest_dir.open_file(self.GIT_COMMIT_PATH, "w").write(self.source.last_commit)
             if self.source.join(".git-facls").exists:
                 try: self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
                 except CommandFailed as e:
@@ -810,9 +800,9 @@ class SFSBuilder(object):
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
-        env_mod = self.run_env_mod.items()
+        env_mod = list(self.run_env_mod.items())
         if env_mod:
-            self.dest_dir.open_file(self.BUILD_ENV_PATH, "wb").write("\n".join(map(lambda (k, v): "%s=%s" % (k, v), env_mod)))
+            self.dest_dir.open_file(self.BUILD_ENV_PATH, "w").write("\n".join(["%s=%s" % (k_v[0], k_v[1]) for k_v in env_mod]))
         run_command(cmd, show_output=True)
         self.target.replace_file(dst_temp)
         sfs_finder.register_sfs(self.target)
@@ -826,7 +816,7 @@ class SFSDirectory(object):
         return str(self.backend)
 
     def __init__(self, backend):
-        if isinstance(backend, basestring):
+        if isinstance(backend, str):
             if os.path.isdir(backend) or backend.startswith('http://') or backend.startswith('https://'):
                 backend = FSPath(backend, walk_pattern="*.sfs")
             elif os.path.isdir(os.path.dirname(backend)):
@@ -879,7 +869,7 @@ class SFSDirectory(object):
                         to_be_unlinked[old_tgt.path] = old_tgt
             info("Unlinking: %s", old_sfs.path)
             to_be_unlinked[old_sfs.path] = old_sfs
-        for tgt in to_be_unlinked.values():
+        for tgt in list(to_be_unlinked.values()):
             try: tgt.unlink()
             except OSError as e:
                 warn("Could not unlink %r: %s", tgt.path, e)
@@ -918,29 +908,29 @@ class FSPath(object):
     _remove_on_del = False
 
     def __new__(cls, path, **attrs):
-        path_str = (path.path if isinstance(path, FSPath) else path if isinstance(path, basestring) else str(path))
+        path_str = (path.path if isinstance(path, FSPath) else path if isinstance(path, str) else str(path))
         path_str = path_str.rstrip('.0123456789')
         if cls == FSPath and (path_str.endswith('.sfs') or path_str.endswith('.sfs.OLD')):
             cls=SFSFile
-        if isinstance(path, basestring) and (path.startswith('http://') or path.startswith('https://')):
+        if isinstance(path, str) and (path.startswith('http://') or path.startswith('https://')):
             cls = type('%s_url' % (cls.__name__,), (cls,), dict(
                 file_size=cached_property(cls._url_file_size),
                 open=cls._url_open, _walk_func=cls._url_walk
             ))
-        return super(FSPath, cls).__new__(cls, path, **attrs)
+        return object.__new__(cls)
 
     def __init__(self, path, **attrs):
         if isinstance(path, FSPath): path=path.path
-        if not isinstance(path, basestring):
+        if not isinstance(path, str):
             raise ValueError("Invalid init path type for %s: %s"%(self.__class__.__name__, type(path).__name__))
         self.path=path
         auto_remove = attrs.pop("auto_remove", False)
         if auto_remove:
             self._remove_on_del = auto_remove
-        map(lambda k: setattr(self, k, attrs[k]), attrs)
+        list(map(lambda k: setattr(self, k, attrs[k]), attrs))
 
     def join(self, *paths):
-        return self.__class__(os.path.join(self.path, *map(lambda p: p.lstrip("/"), paths)))
+        return self.__class__(os.path.join(self.path, *[p.lstrip("/") for p in paths]))
 
     @property
     def exists(self):
@@ -959,7 +949,7 @@ class FSPath(object):
     @cached_property
     def backend(self):
         if self.mountpoint.fs_type=="aufs":
-            for mpt in map(lambda c: c.mountpoint, reversed(self.mountpoint.aufs_components)):
+            for mpt in [c.mountpoint for c in reversed(self.mountpoint.aufs_components)]:
                 if self.path in mpt: return FSPath(mpt.loop_backend)
         raise RuntimeError("Cannot determine backend of file", self.path)
 
@@ -979,7 +969,7 @@ class FSPath(object):
     def __eq__(self, other):
         if isinstance(other, FSPath):
             return self.path == other.path
-        elif isinstance(other, basestring):
+        elif isinstance(other, str):
             return self.path == other
         else:
             return super(FSPath, self) == other
@@ -990,12 +980,12 @@ class FSPath(object):
         return open(self.path, mode)
 
     def _url_open(self, mode="rb"):
-        return urllib2.urlopen(self.path)
+        return urllib.request.urlopen(self.path)
 
     _href_re = re.compile(r'<a\b[^>]*\bhref=([^\s>]+)[^>]*>')
     _proto_re = re.compile(r'^\w+:')
     def _url_walk(self, path):
-        resp = urllib2.urlopen(path)
+        resp = urllib.request.urlopen(path)
         if not resp.code == 200:
             raise BadArgumentsError("Status code not OK: %s %s" % (resp.code, resp.msg))
         if not resp.headers.type == "text/html":
@@ -1015,7 +1005,7 @@ class FSPath(object):
     def makedirs(self, mode=0o755, sudo=False):
         if not self.exists:
             if sudo:
-                run_command(["mkdir", "-m", oct(mode), "-p", self.path], as_user="root")
+                run_command(["mkdir", "-m", "%04o"%(mode), "-p", self.path], as_user="root")
             else:
                 self.parent_directory.makedirs(mode)
                 os.mkdir(self.path, mode)
@@ -1025,10 +1015,10 @@ class FSPath(object):
 
     def walk(self, pattern=None, file_class=None, exclude=None, depth=None):
         if pattern is None: pattern = self.walk_pattern
-        if isinstance(pattern, basestring):
+        if isinstance(pattern, str):
             pattern = pattern.split(",")
         if exclude is None: exclude = self.walk_exclude
-        if isinstance(exclude, basestring):
+        if isinstance(exclude, str):
             exclude = exclude.split(",")
         if file_class is None: file_class=FSPath
         if depth is None: depth=self.walk_depth
@@ -1036,10 +1026,10 @@ class FSPath(object):
             if depth is not None and d.count('/') - self.path.count('/') == depth:
                 dn[:] = []
             if not self.walk_hidden:
-                dn[:]=filter(lambda x: not x.startswith("."), dn)
-                fn[:]=filter(lambda x: not x.startswith("."), fn)
-            for f in filter(lambda n: any(map(lambda pat: fnmatch.fnmatch(n, pat), pattern)), fn):
-                if any(map(lambda pat: fnmatch.fnmatch(f, pat), exclude)):
+                dn[:]=[x for x in dn if not x.startswith(".")]
+                fn[:]=[x for x in fn if not x.startswith(".")]
+            for f in [n for n in fn if any([fnmatch.fnmatch(n, pat) for pat in pattern])]:
+                if any([fnmatch.fnmatch(f, pat) for pat in exclude]):
                     continue
                 yield file_class(os.path.join(d, f))
 
@@ -1086,7 +1076,7 @@ class FSPath(object):
     def mountpoint(self):
         orig_dev=os.stat(self.path).st_dev
         path_components=os.path.realpath(self.path).split(os.path.sep)
-        sub_paths=map(lambda n: os.path.sep.join(path_components[:n+1]) or os.path.sep, range(len(path_components)))
+        sub_paths=[os.path.sep.join(path_components[:n+1]) or os.path.sep for n in range(len(path_components))]
         cur_path=self.path
         for test_path in reversed(sub_paths):
             if not os.stat(test_path).st_dev==orig_dev:
@@ -1184,13 +1174,21 @@ class MountInfo(object):
             for line in minfo_fobj:
                 ret = self.proc_mountinfo_line(line)
                 yield ret
+    
+    @staticmethod
+    def decode_escapes(s):
+        try:
+            return s.decode('string_escape')
+        except (AttributeError,LookupError):
+            import codecs
+            return codecs.escape_decode(s.encode('utf8'))[0].decode('utf8')
 
     @staticmethod
     def proc_mountinfo_line(line):
         parts=line.rstrip('\n').split(' ')
         ret = dict(mount_id=int(parts[0]), parent_id=int(parts[1]),
-                   st_dev=reduce(lambda a, b: (a<<8)+b, map(int, parts[2].split(':'))),
-                   root=parts[3].decode("string_escape"), mnt=parts[4].decode("string_escape"),
+                   st_dev=reduce(lambda a, b: (a<<8)+b, list(map(int, parts[2].split(':')))),
+                   root=MountInfo.decode_escapes(parts[3]), mnt=MountInfo.decode_escapes(parts[4]),
                    opts_mnt=set(parts[5].split(",")), opt_fields=set())
         idx=6
         while not parts[idx]=='-':
@@ -1255,12 +1253,12 @@ class Downloader(object):
     http_read_size = 8192
     http_time_format = "%a, %d %b %Y %H:%M:%S GMT"
 
-    _env_proxy_vars = " ".join(filter(lambda n: n.lower().endswith('_proxy'), os.environ.keys()))
+    _env_proxy_vars = " ".join([n for n in list(os.environ.keys()) if n.lower().endswith('_proxy')])
     pass_host_env = os.environ.get("DL_PROXY_ENV_VARS", _env_proxy_vars).split()
 
     @cached_property
     def proxy_env(self):
-        return dict(map(lambda n: (n, os.environ[n]), filter(lambda n: n in os.environ, self.pass_host_env)))
+        return dict([(n, os.environ[n]) for n in [n for n in self.pass_host_env if n in os.environ]])
 
     @cached_property
     def cache_dir(self):
@@ -1301,7 +1299,7 @@ class Downloader(object):
             return GitRepo(dest_path)
 
     def dl_file_url(self, source, dest_path):
-        opener = urllib2.build_opener()
+        opener = urllib.request.build_opener()
         if os.path.exists(dest_path):
             dest_st = os.stat(dest_path)
             if dest_st.st_size > 0:
@@ -1309,7 +1307,7 @@ class Downloader(object):
                                           time.strftime(self.http_time_format, time.gmtime(dest_st.st_mtime))))
         try:
             url_f = opener.open(source)
-        except urllib2.HTTPError as e:
+        except urllib.error.HTTPError as e:
             if e.code == 304:
                 return FSPath(dest_path)
             raise
@@ -1327,7 +1325,7 @@ class Downloader(object):
                     info("No data in %s seconds, stalled?", self.http_recv_tmout)
                     continue
             d = url_f.read(self.http_read_size)
-            if d == '':
+            if not d:
                 break
             dest_f.write(d)
         dest_f.close()
@@ -1342,7 +1340,7 @@ class Downloader(object):
         if dest_dir is None:
             dest_dir = self.cache_dir
         if fname is None:
-            fname = "%s-%s" % (hashlib.md5(source).hexdigest()[:8], os.path.basename(source))
+            fname = "%s-%s" % (hashlib.md5(source.encode('utf-8')).hexdigest()[:8], os.path.basename(source))
             if fname.endswith('.git'):
                 fname = fname[:-4]
         dest = os.path.join(dest_dir, fname)
@@ -1443,7 +1441,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def git_source(self):
-        try: git_source = self.open_file(self.GIT_SOURCE_PATH).read().strip()
+        try: git_source = self.open_file(self.GIT_SOURCE_PATH, "r").read().strip()
         except IOError: return
         if '#' in git_source:
             git_source, self._git_branch = git_source.rsplit('#', 1)
@@ -1453,7 +1451,7 @@ class SFSFile(FSPath):
 
     @cached_property
     def git_commit(self):
-        try: return self.open_file(self.GIT_COMMIT_PATH).read().strip()
+        try: return self.open_file(self.GIT_COMMIT_PATH, "r").read().strip()
         except IOError: pass
 
     @cached_property
@@ -1484,7 +1482,7 @@ class SFSFile(FSPath):
         try:
             run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir,
                            lbu=FSPath(__file__).parent_directory.path)
-            try: run_env.update(_load_build_env(self.open_file(self.BUILD_ENV_PATH).read()))
+            try: run_env.update(_load_build_env(self.open_file(self.BUILD_ENV_PATH, "r").read()))
             except IOError: pass
             run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
                         show_output=True, env=run_env)
@@ -1492,10 +1490,10 @@ class SFSFile(FSPath):
             return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
 
-    def open_file(self, path):
+    def open_file(self, path, *args, **kwargs):
         if self.mounted_path == None:
             self.mount()
-        return self.mounted_path.open_file(path)
+        return self.mounted_path.open_file(path, *args, **kwargs)
 
     def mount(self, mountdir=None, auto_remove=True):
         if mountdir is None:
@@ -1554,7 +1552,7 @@ _mount_tab=None
 
 def _load_mount_tab():
     global _mount_tab
-    _mount_tab=map(lambda l: l.rstrip("\n").split(), reversed(list(open("/proc/mounts"))))
+    _mount_tab=[l.rstrip("\n").split() for l in reversed(list(open("/proc/mounts")))]
 
 
 class MountPoint(FSPath):
@@ -1593,7 +1591,7 @@ class MountPoint(FSPath):
         if auto_remove:
             self._remove_on_del = True
         if opts or kwargs:
-            cmd.extend(["-o", ",".join(list(opts) + map(lambda k: "%s=%s"%(k, kwargs[k]), kwargs))])
+            cmd.extend(["-o", ",".join(list(opts) + ["%s=%s"%(k, kwargs[k]) for k in kwargs])])
         run_command(cmd, as_user='root')
 
     def remove_on_delete(self, value=True):
@@ -1617,7 +1615,7 @@ class MountPoint(FSPath):
 
     @cached_property
     def aufs_si(self):
-        return filter(lambda x: x.startswith("si="), self.mount_options)[0].split("=")[1]
+        return list(filter(lambda x: x.startswith("si="), self.mount_options))[0].split("=")[1]
 
     @cached_property
     def aufs_components(self):
@@ -1630,7 +1628,7 @@ class MountPoint(FSPath):
         return components
 
     def __contains__(self, item):
-        if isinstance(item, basestring):
+        if isinstance(item, str):
             ret=os.path.exists(os.path.join(self.path, "./" + item))
             return ret
         raise ValueError("Unknown item type", type(item).__name__)
@@ -1647,7 +1645,7 @@ class MountPoint(FSPath):
     def mount_combined(self, parts, **kwargs):
         dirs = []
         for part in parts:
-            if isinstance(part, basestring):
+            if isinstance(part, str):
                 if '/' in part and os.path.exists(part):
                     part = FSPath(part)
                 else:
@@ -1666,7 +1664,7 @@ class MountPoint(FSPath):
             rw_mount.mount("comnt-rw", fs_type="tmpfs", mode="0755")
         kwargs.setdefault("fs_type", self.default_combined_fs_type)
         if kwargs["fs_type"] == "aufs":
-            dirs_arg = ":".join(["%s=rw" % (rw_mount.path,)] + map(lambda d: "%s=ro" % (d,), reversed(dirs)))
+            dirs_arg = ":".join(["%s=rw" % (rw_mount.path,)] + ["%s=ro" % (d,) for d in reversed(dirs)])
             kwargs.setdefault("dirs", dirs_arg)
         elif kwargs["fs_type"] == "overlay":
             kwargs.setdefault("lowerdir", ":".join(reversed(dirs)))
@@ -1681,10 +1679,10 @@ class MountPoint(FSPath):
 
 class KVer(object):
     def __init__(self, s):
-        self.value = map(lambda z: map(lambda y: int(y) if y.isdigit() else y, z.split(".")), s.split("-"))
+        self.value = [[int(y) if y.isdigit() else y for y in z.split(".")] for z in s.split("-")]
 
     def __str__(self):
-        return "-".join(map(lambda v: ".".join(map(str, v)), self.value))
+        return "-".join([".".join(map(str, v)) for v in self.value])
 
     def __cmp__(self, other):
         if isinstance(other, KVer):
@@ -1923,7 +1921,7 @@ class BootDirBuilder(FSPath):
         if self.mkrd_pkgs:
             self.build_lxc.apt_install(self.mkrd_pkgs)
         cmd = ["make", "-C", self.LXC_MKRD_DIR] + \
-            map(lambda k: "%s=%s" % (k, makeargs[k]), makeargs)
+            ["%s=%s" % (k, makeargs[k]) for k in makeargs]
         self.build_lxc.run(cmd, env=self.run_env, show_output=True)
 
 
@@ -1958,7 +1956,7 @@ def sfs_info(filename):
                git_commit=sfs.git_commit,
                git_branch=sfs.git_branch,
                curlink_sfs=sfs.curlink_sfs().path)
-    for k, v in ret.items():
+    for k, v in list(ret.items()):
         if v is None:
             del ret[k]
     return ret
@@ -1984,7 +1982,7 @@ def mountpoint_x(dev):
 
 def blkid2mnt(blkid):
     with open("/proc/mounts") as proc_mounts:
-        for a, b, _ in map(lambda line: line.split(None, 2), proc_mounts):
+        for a, b, _ in [line.split(None, 2) for line in proc_mounts]:
             try:
                 if mountpoint_x(a)==blkid:
                     return b.replace("\\040", " ")
@@ -2007,17 +2005,17 @@ def _read_until_block(fobj):
                 break
             else:
                 raise
-        if d=='': break
+        if not d: break
         buf.append(d)
     fcntl.fcntl(fobj, fcntl.F_SETFL, old_flags)
-    return ''.join(buf)
+    return ''.join(buf) if isinstance(d, str) else b''.join(buf)
 
 
 def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
     if as_user is not None:
         if isinstance(as_user, int):
             as_user = pwd.getpwuid(as_user)
-        elif isinstance(as_user, basestring):
+        elif isinstance(as_user, str):
             as_user = pwd.getpwnam(as_user)
 
         if not os.getuid() == as_user.pw_uid:
@@ -2025,7 +2023,7 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
             cmd = ['sudo', '-E', '-u', as_user.pw_name] + cmd
 
     cmd_env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
-    for k, v in env.iteritems():
+    for k, v in env.items():
         if v is None:
             if k in cmd_env: del cmd_env[k]
         else:
@@ -2046,16 +2044,16 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
                                        (stderr_buf, proc.stderr, 'stderr', sys.stderr)):
             if f not in in_f: continue
             data=_read_until_block(f)
-            if data=='':
+            if not data:
                 check_f.remove(f)
                 continue
             buf.append(data)
             if show_output:
-                sys_f.write(data.replace("\r\n", "\n").replace("\n", "\r\n"))
+                sys_f.write(data.decode('utf8').replace("\r\n", "\n").replace("\n", "\r\n"))
                 sys_f.flush()
-            debug("%s: %r", log_tag, data.rstrip('\n'))
-    stderr_data = "".join(stderr_buf).rstrip('\n')
-    stdout_data = "".join(stdout_buf).rstrip('\n')
+            debug("%s: %r", log_tag, data.rstrip(b'\n'))
+    stderr_data = b"".join(stderr_buf).rstrip(b'\n').decode("utf8")
+    stdout_data = b"".join(stdout_buf).rstrip(b'\n').decode("utf8")
     rcode = proc.wait()
     if rcode:
         raise CommandFailed(cmd, rcode, stderr_data, stdout_data)
@@ -2072,7 +2070,7 @@ def mount(src, dst, *opts, **kwargs):
     if kwargs.pop("bind", False):
         cmd.append("--bind")
     if opts or kwargs:
-        cmd.extend(["-o", ",".join(list(opts) + map(lambda k: "%s=%s"%(k, kwargs[k]), kwargs))])
+        cmd.extend(["-o", ",".join(list(opts) + ["%s=%s"%(k, kwargs[k]) for k in kwargs])])
     run_command(cmd, as_user='root')
 
 
@@ -2081,7 +2079,7 @@ def mount(src, dst, *opts, **kwargs):
 def mnt2dev(mnt, pos=0):
     esc_name=os.path.realpath(mnt).replace(" ", "\\040")
     with open("/proc/mounts") as proc_mounts:
-        return filter(lambda l: l[1]==esc_name, map(lambda line: line.strip().split(), proc_mounts))[-1][pos]
+        return filter(lambda l: l[1]==esc_name, [line.strip().split() for line in proc_mounts])[-1][pos]
 
 
 @cli_func(desc="Find disk name holding specified partition")
@@ -2095,7 +2093,7 @@ def part2disk(dev):
 
 @cli_func(desc="Find a block device based on blkid(8) tag")
 def blkid_find(**tags):
-    cmd=reduce(lambda a, b: a + ["-t", "%s=%s"%b], tags.items(), ["blkid", "-o", "device"])
+    cmd=reduce(lambda a, b: a + ["-t", "%s=%s"%b], list(tags.items()), ["blkid", "-o", "device"])
     return _root_command_out(cmd).split("\n")
 
 _url_re=re.compile(r'^(?P<schema>https?|ftp)://.*')
@@ -2104,7 +2102,7 @@ _url_re=re.compile(r'^(?P<schema>https?|ftp)://.*')
 @cli_func(desc="Show file or URL-based SFS file create stamp")
 def sfs_stamp(src):
     if _url_re.match(src):
-        with urllib2.urlopen(src) as file_obj:
+        with urllib.request.urlopen(src) as file_obj:
             return sfs_stamp_file(file_obj)
     else: return sfs_stamp_file(src)
 
@@ -2136,7 +2134,7 @@ def _sfs_nfo_func(fname):
 def _sfs_list_rm_empty(node):
     if "files" in node and not node["files"]: del node["files"]
     if "dirs" in node:
-        for n in node["dirs"].keys():
+        for n in list(node["dirs"].keys()):
             _sfs_list_rm_empty(node["dirs"][n])
             if not node["dirs"][n]: del node["dirs"][n]
         if not node["dirs"]: del node["dirs"]
@@ -2148,7 +2146,7 @@ def gen_sfs_list(target_dir, exclude_pat="", include_pat="*.sfs,*/vmlinuz-*,*/ra
 @cli_func(desc="Retrieve sfs creation stamp from file-like object")
 def sfs_stamp_file(f):
     close=False
-    if isinstance(f, basestring):
+    if isinstance(f, str):
         close=True
         f=open(f, "rb")
     try: d=f.read(1024)
@@ -2170,7 +2168,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
     """[--no-act] {--list | --auto-rebuild | <source_dir>} [<target_dirs>...]"""
     if not source_dir[:2] == '--':
         source_dir = SFSDirectory(source_dir)
-    target_dirs=map(SFSDirectory, target_dirs)
+    target_dirs=list(map(SFSDirectory, target_dirs))
     if not target_dirs: target_dirs=(SFSDirectoryAufs(), )
     skip_sfs = set(os.environ.get("SFS_UPDATE_SKIP", "").split(","))
     for target_dir in target_dirs:
@@ -2192,17 +2190,13 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                 info("Skipping ('%s' listed in $SFS_UPDATE_SKIP)", sfs.basename.strip_down())
                 continue
             if source_dir=='--list':
-                print sfs.path
+                print(sfs.path)
                 continue
             dst_sfs = sfs.curlink_sfs()
             if source_dir=='--auto-rebuild':
                 if dst_sfs.git_source:
                     info("Git repo for %s: %s", dst_sfs.basename, dst_sfs.git_source)
-                try: latest_stamp = dst_sfs.latest_stamp
-                except Exception as e:
-                    warn("Reading last stamp of %r failed: %r", dst_sfs, e)
-                    continue
-                if latest_stamp > dst_sfs.create_stamp:
+                if dst_sfs.latest_stamp > dst_sfs.create_stamp:
                     info("Rebuilding %s: %s > %s", dst_sfs.basename,
                          stamp2txt(dst_sfs.latest_stamp), stamp2txt(dst_sfs.create_stamp))
                     if not no_act:
@@ -2284,14 +2278,14 @@ def aufs_update_branch(mnt, aufs="/"):
         return
     info("Updating: %s -> %s", sfs, cur_sfs)
     aufs_mnt = MountPoint(aufs)
-    comp_match = filter(lambda c: c == mnt, aufs_mnt.aufs_components)
+    comp_match = [c for c in aufs_mnt.aufs_components if c == mnt]
     if not comp_match:
         warn("Could not find component path %r in aufs mount %r", mnt.path, aufs_mnt.path)
         return
     cur_mnt = cur_sfs.mounted_path
     if cur_mnt is None:
         cur_mnt = cur_sfs.mount(auto_remove=False)
-    cur_comp_match = filter(lambda c: c == cur_mnt, aufs_mnt.aufs_components)
+    cur_comp_match = [c for c in aufs_mnt.aufs_components if c == cur_mnt]
     sfs_mnt = MountPoint(comp_match[0])
     if cur_comp_match:
         warn("Updated component already included in AUFS (old: %d, new: %d)",
@@ -2308,9 +2302,9 @@ def aufs_update_branch(mnt, aufs="/"):
 def lxc_run(name, init='exec bash -i >&0 2>&0', sfs_parts='00-* settings scripts', bind=None, vlan=None, veth=None, devs=None, nonet=False):
     args = dict(sfs_parts=sfs_parts.split(), auto_remove=True, init_cmd=['sh', '-c', init], nonet=nonet)
     if vlan is not None:
-        args["vlan"] = map(lambda v: v.split(":"), vlan.split(" "))
+        args["vlan"] = [v.split(":") for v in vlan.split(" ")]
     if veth is not None:
-        args["veth"] = map(lambda v: v.split(":"), veth.split(" "))
+        args["veth"] = [v.split(":") for v in veth.split(" ")]
     if bind is not None:
         args["bind_dirs"] = []
         for b in bind.split():

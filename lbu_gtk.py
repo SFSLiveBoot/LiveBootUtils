@@ -1,7 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 import gi
 import os
+import traceback
 
 import lbu_common
 from lbu_common import cached_property
@@ -25,20 +26,20 @@ class AppWindow(Gtk.ApplicationWindow):
                 return i
 
     def sfs_store_append(self, **vals):
-        return self.sfs_store.get_path(self.sfs_store.append(map(lambda x: vals.get(x[0]), self.sfs_store_cols)))
+        return self.sfs_store.get_path(self.sfs_store.append([vals.get(x[0]) for x in self.sfs_store_cols]))
 
     def __init__(self, *args, **kwargs):
         Gtk.ApplicationWindow.__init__(self, *args, **kwargs)
         self.set_default_size(1024, 500)
         self.set_icon_name('package-x-generic')
 
-        self.sfs_store = Gtk.ListStore(*map(lambda c: c[1], self.sfs_store_cols))
+        self.sfs_store = Gtk.ListStore(*[c[1] for c in self.sfs_store_cols])
         sw = Gtk.ScrolledWindow()
         vbox = Gtk.Box()
         vbox.set_orientation(Gtk.Orientation.VERTICAL)
         vbox.pack_start(sw, True, True, 0)
         self.add(vbox)
-        self.tv = Gtk.TreeView(self.sfs_store)
+        self.tv = Gtk.TreeView(model=self.sfs_store)
         name_render = Gtk.CellRendererText()
         file_icon_render = Gtk.CellRendererPixbuf()
         update_icon_render = Gtk.CellRendererPixbuf()
@@ -126,6 +127,7 @@ class AppWindow(Gtk.ApplicationWindow):
             curlink = sfs.curlink_sfs()
         except Exception as e:
             warn("Error checking %r: %s", sfs, e)
+            traceback.print_exc()
             row[self.store_col_idx('update-icon')] = 'network-error'
             row[self.store_col_idx('update-reason')] = 'Error: %s' % (e,)
             return
@@ -147,6 +149,7 @@ class AppWindow(Gtk.ApplicationWindow):
             row[self.store_col_idx('update-icon')] = 'network-error'
             row[self.store_col_idx('update-reason')] = "Check failed: %s: %s" % (e.__class__.__name__, e,)
             warn("Error during updating %r: %s", sfs, e)
+            traceback.print_exc()
         else:
             if need_update:
                 row[self.store_col_idx('update-icon')] = 'software-update-available'
@@ -180,8 +183,7 @@ class Application(Gtk.Application):
 
     def on_row_activate(self, tv, path, tvc):
         store = tv.get_model()
-        state, msg, mnt, sfs, src = map(lambda n: store[path][self.window.store_col_idx(n)],
-                                        ('update-icon', 'update-reason', 'mnt', 'file', 'git-source'))
+        state, msg, mnt, sfs, src = [store[path][self.window.store_col_idx(n)] for n in ('update-icon', 'update-reason', 'mnt', 'file', 'git-source')]
         dlg_msg = ''
         if state == 'gtk-apply':
             dlg_msg = "Looks like %s is up to date." % (sfs.path,)
