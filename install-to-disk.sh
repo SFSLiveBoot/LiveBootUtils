@@ -162,7 +162,8 @@ copy_root_parts() {
     cp -v "$kernel" "$dst/$arch/"
   }
   test -e "$initrd_dst" || {
-    for initrd in "$initrd" "${kernel%/*}/ramdisk-$kver" /boot/ramdisk-$kver /live/$arch/ramdisk-$kver /live/ramdisk-$kver;do
+    for initrd in "$initrd" "${kernel%/*}/ramdisk-$kver" /boot/ramdisk-$kver /live/$arch/ramdisk-$kver /live/ramdisk-$kver \
+      "$(dirname "$(losetup | grep -o "/[^[:space:]]*/10-kernel-$kver.sfs")")/ramdisk-$kver"; do
       test ! -r "$initrd" || break
     done
     while true;do
