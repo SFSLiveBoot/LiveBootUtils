@@ -1401,7 +1401,7 @@ class SFSFile(FSPath):
 
     def validate_sfs(self):
         if not os.path.isfile(self.path): return False
-        return self.open().read(4)=="hsqs"
+        return self.open().read(4) == b"hsqs"
 
     fn_ts_re = re.compile(r'^(.+?)(?:(\.OLD)?\.([0-9]+))+(?: \(deleted\))?$')
 
@@ -1531,7 +1531,8 @@ class SFSFile(FSPath):
             if progress_cb: progress_cb(nbytes)
             while True:
                 data=src_fobj.read(self.chunk_size)
-                if data=="": break
+                if not data:
+                    break
                 if create_stamp is None:
                     create_stamp=self._get_create_stamp(data)
                 nbytes+=len(data)
@@ -2152,7 +2153,8 @@ def sfs_stamp_file(f):
     try: d=f.read(1024)
     finally:
         if close: f.close()
-    if d[:4]!="hsqs": raise NotSFS("file does not have sqsh signature")
+    if d[:4] != b"hsqs":
+        raise NotSFS("file does not have sqsh signature")
     return struct.unpack("<I", d[8:8 + 4])[0]
 
 def _update_sfs_parse_args(argv):
