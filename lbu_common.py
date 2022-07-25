@@ -982,17 +982,18 @@ class FSPath(object):
     def _url_open(self, mode="rb"):
         return urllib.request.urlopen(self.path)
 
-    _href_re = re.compile(r'<a\b[^>]*\bhref=([^\s>]+)[^>]*>')
+    _href_re = re.compile(rb'<a\b[^>]*\bhref=([^\s>]+)[^>]*>')
     _proto_re = re.compile(r'^\w+:')
     def _url_walk(self, path):
         resp = urllib.request.urlopen(path)
         if not resp.code == 200:
             raise BadArgumentsError("Status code not OK: %s %s" % (resp.code, resp.msg))
-        if not resp.headers.type == "text/html":
+        if not resp.headers.get_content_type() == "text/html":
             raise BadArgumentsError("not text/html: %r"%(resp.type))
         dir_names = []
         file_names = []
         for href in self._href_re.findall(resp.read()):
+            href = href.decode("utf8")
             if href.startswith('"') or href.startswith("'"):
                 href = href[1:-1]
             if href.startswith('/') or href == "." or href == ".." or self._proto_re.match(href):
