@@ -1884,10 +1884,10 @@ class BootDirBuilder(FSPath):
 
     def build_grubconf(self):
         info("Creating grub config")
-        self.join("boot/grub").open_file("grub.cfg", "wb").write(
+        self.join("boot/grub").open_file("grub.cfg", "w").write(
             open(os.path.join(lbu_dir, "scripts", "grub.cfg")).read())
 
-        with self.join("grubvars.cfg").open("wb") as gcfg:
+        with self.join("grubvars.cfg").open("w") as gcfg:
             gcfg.write('set dist="%s"\n' % (self.dist_dirname,))
             gcfg.write('set kver="%s"\n' % (self.kver,))
             gcfg.write('set arch="%s"\n' % (self.arch_dir.basename,))
