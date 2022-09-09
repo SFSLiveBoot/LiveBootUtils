@@ -521,7 +521,7 @@ lxc.net.%(netnum)d.link = %(link)s
             self.start()
         try: return run_command(["lxc-attach", "-e", "-n", self.name, "--"] + cmd, as_user="root", **args)
         except CommandFailed as e:
-            warn("Command %r failed with %d", cmd, e[1])
+            warn("Command %r failed with %d", cmd, e.args[1])
             args.setdefault("show_output", True)
             if "LXC_RUN_FAILSCRIPT" in os.environ:
                 run_command(["sh", "-c", os.environ["LXC_RUN_FAILSCRIPT"], "_fail.sh", self.name] + cmd, **args)
@@ -751,7 +751,7 @@ class SFSBuilder(object):
             run_command(["bash", "--rcfile", self.SFS_BUILD_PROFILE_SH, "-i"], cwd=self.dest_dir.path, show_output=True,
                         env=dict(self.run_env, sfs_build_target=self.target.basename, DESTDIR=self.dest_dir.path))
         except CommandFailed as e:
-            warn("Build aborted from shell (exit status: %s)", e[1])
+            warn("Build aborted from shell (exit status: %s)", e.args[1])
             raise BuildAborted()
 
     def build(self):
@@ -772,7 +772,7 @@ class SFSBuilder(object):
             cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
             try: self.run_in_dest(cmd, show_output=True)
             except CommandFailed as e:
-                warn("Script %r failed with %d", script.basename, e[1])
+                warn("Script %r failed with %d", script.basename, e.args[1])
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
                 raise BuildAborted()
@@ -796,7 +796,7 @@ class SFSBuilder(object):
             if self.source.join(".git-facls").exists:
                 try: self.run_in_dest(["sh", "-c", "cd \"$DESTDIR\"; setfacl --restore=.git-facls"])
                 except CommandFailed as e:
-                    warn("setfacl failed: %r", e[2])
+                    warn("setfacl failed: %r", e.args[2])
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
@@ -1287,7 +1287,7 @@ class Downloader(object):
             if git_branch: cmd += [git_branch]
             try: run_command(cmd, cwd=dest_path, env=git_env)
             except CommandFailed as e:
-                warn("Update failed, will use old cache for %r. Error message: %r", dest_path, e[2])
+                warn("Update failed, will use old cache for %r. Error message: %r", dest_path, e.args[2])
                 return GitRepo(dest_path)
             if os.path.exists(os.path.join(dest_path, '.gitmodules')):
                 run_command(['git', 'submodule', 'update', '--depth', '1'], cwd=dest_path, env=git_env)
