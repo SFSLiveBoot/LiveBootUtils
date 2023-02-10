@@ -682,7 +682,7 @@ class SFSBuilder(object):
     @cached_property
     def lxc_parts(self):
         ret = None
-        try: ret = self.dest_dir.open_file(self.LXC_PARTS_FILE).read().strip().split()
+        try: ret = self.dest_dir.open_file(self.LXC_PARTS_FILE, "r").read().strip().split()
         except IOError as e:
             if not e.errno == errno.ENOENT:
                 raise
