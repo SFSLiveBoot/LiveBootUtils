@@ -768,6 +768,10 @@ class SFSBuilder(object):
             if not apt_updated:
                 self.run_in_dest(["apt-get", "update"], show_output=True)
                 apt_updated = True
+            before_build_script = os.environ.get(
+                "BEFORE_BUILD_{0}".format(script.basename.replace("-","_").replace(".","_")))
+            if before_build_script:
+                self.run_in_dest(["sh", "-c", before_build_script], show_output=True)
             info("Running %s", script.basename)
             cmd = [os.path.join(self.LXC_DESTDIR, self.SFS_SRC_D.lstrip("/"), script.basename)]
             try: self.run_in_dest(cmd, show_output=True)
