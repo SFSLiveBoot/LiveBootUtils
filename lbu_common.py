@@ -1650,6 +1650,7 @@ class MountPoint(FSPath):
 
     def mount_combined(self, parts, **kwargs):
         dirs = []
+        automounted_sfs = []
         for part in parts:
             if isinstance(part, str):
                 if '/' in part and os.path.exists(part):
@@ -1659,6 +1660,7 @@ class MountPoint(FSPath):
             if isinstance(part, SFSFile):
                 if not part.mounted_path:
                     part.mount()
+                    automounted_sfs.append(part)
                 part = part.mounted_path
             dirs.append(part.path)
         if os.environ.get("LXC_RW_D"):
