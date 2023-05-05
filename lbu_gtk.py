@@ -13,6 +13,7 @@ from gi.repository import Gtk, GLib, Pango, Vte
 
 from logging import warn
 
+import threading
 
 class AppWindow(Gtk.ApplicationWindow):
     sfs_store_cols = [('file', object), ('file-path', str), ('mnt', str), ('stamp', str), ('icon-name', str),
@@ -160,9 +161,41 @@ class AppWindow(Gtk.ApplicationWindow):
                 row[self.store_col_idx('update-reason')] = 'Up to date.'
 
 
+class Checker(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        threading.Thread.__init__(self, *args, **kwargs)
+        self.todo = []
+        self.wait_lock = threading.Lock()
+    def run(self):
+        keep_running = True
+        while keep_running:
+            while self.todo:
+                check_method, check_path = self.todo.pop(0)
+                if check_method == None:
+                    keep_running = False
+                    break
+                try: more = check_method(check_path)
+                except Exception as e:
+                    warn("cannot check %r with %r: %s", check_path, check_method, e)
+                else:
+                    if more:
+                        self.todo.append(more)
+            if keep_running:
+                self.wait_lock.acquire()
+        return
+    def append(self, check_method, check_path=None):
+        self.todo.append((check_method, check_path))
+        if self.wait_lock.locked():
+            self.wait_lock.release()
+        if check_method and not self.is_alive():
+            self.start()
+    def clear(self):
+        if self.todo:
+            self.todo.clear()
+
 class Application(Gtk.Application):
     window = None
-    more_to_check = None
+    checker = Checker(daemon=True)
 
     @cached_property
     def lbu_cmd(self):
@@ -221,22 +254,9 @@ class Application(Gtk.Application):
         win.set_title("Finished[%d]: %s" % (ret_status, win.get_title(),))
         self.update_sfs_info()
 
-    def do_check_more(self):
-        if not self.more_to_check:
-            return False
-        check_method, check_path = self.more_to_check.pop(0)
-        try:
-            more_checks = check_method(check_path)
-        except Exception as e:
-            warn("Check %r for %s failed: %s", check_method, check_path, e)
-        else:
-            if more_checks:
-                self.more_to_check.append(more_checks)
-        return True if self.more_to_check else False
-
     def update_sfs_info(self, *args):
         self.window.sfs_store.clear()
-        self.more_to_check = []
+        self.checker.clear()
 
         for branch in lbu_common.MountPoint('/').aufs_components:
             data = {"mnt": branch.path, "icon-name": "folder"}
@@ -258,10 +278,7 @@ class Application(Gtk.Application):
 
             store_path = self.window.sfs_store_append(**data)
             if check_more:
-                self.more_to_check.append((self.window.do_sfs_check, store_path))
-
-        if self.more_to_check:
-            GLib.idle_add(self.do_check_more)
+                self.checker.append(self.window.do_sfs_check, store_path)
 
 
 if __name__ == '__main__':
