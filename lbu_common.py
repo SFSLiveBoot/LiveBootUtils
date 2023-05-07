@@ -2338,3 +2338,8 @@ def build_efi(path, arch=os.uname()[4], kver=os.uname()[2]):
 def prune_old_sfs(path):
     sfs_dir = SFSDirectory(path)
     sfs_dir.prune_old_sfs()
+
+@cli_func(desc="locate original path for file in combined fs")
+def locate_orig(path):
+    f = FSPath(path)
+    return f.aufs_original.path
