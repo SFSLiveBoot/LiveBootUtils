@@ -2087,7 +2087,7 @@ def mount(src, dst, *opts, **kwargs):
 def mnt2dev(mnt, pos=0):
     esc_name=os.path.realpath(mnt).replace(" ", "\\040")
     with open("/proc/mounts") as proc_mounts:
-        return filter(lambda l: l[1]==esc_name, [line.strip().split() for line in proc_mounts])[-1][pos]
+        return list(filter(lambda l: l[1]==esc_name, [line.strip().split() for line in proc_mounts]))[-1][pos]
 
 
 @cli_func(desc="Find disk name holding specified partition")
