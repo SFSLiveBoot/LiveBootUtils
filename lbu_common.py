@@ -305,7 +305,7 @@ lxc.mount.auto = proc sys
 
             @cached_property
             def opts(self):
-                return ",".join(["bind"] + (["ro"] if self.ro else []))
+                return ",".join(["bind", "create=dir"] + (["ro"] if self.ro else []))
 
             def __init__(self, src, dst, ro=False):
                 TemplatedString.__init__(self, src=src, dst=dst, ro=ro)
@@ -378,7 +378,6 @@ lxc.net.%(netnum)d.link = %(link)s
                 src, dst, ro = src.src, src.dst, src.ro
             if dst is None:
                 dst = src.lstrip("/")
-            self.extra_parts.append("lxc.hook.pre-mount = /bin/sh -c 'mkdir -p \"$LXC_ROOTFS_PATH/%s\"'" % (dst,))
             self.extra_parts.append(self.MountEntry(src, dst, ro))
 
         def add_hostnet(self):
