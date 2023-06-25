@@ -498,7 +498,7 @@ lxc.net.%(netnum)d.link = %(link)s
         except CommandFailed as e:
             warn("Starting LXC instance %r failed: %r", self.name, e)
             if sys.stdin.isatty():
-                __import__("pdb").set_trace()
+                breakpoint()
             raise
 
     def apt_install(self, packages):
