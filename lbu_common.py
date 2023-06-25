@@ -637,8 +637,9 @@ class SFSBuilder(object):
             git_tar_out = ("cd \"$SRC\";git archive HEAD | tar x -C \"$DESTDIR\";"
                            "P=\"$(readlink -f .)\" git submodule --quiet foreach "
                            "'git archive --prefix=\"${PWD#$P/}/\" HEAD | tar x -C \"$DESTDIR\"'")
+            src_uid = os.stat(self.source.path).st_uid
             run_command(["sh", "-c", git_tar_out],
-                        env=dict(DESTDIR=dest_dir.path, SRC=self.source.path), as_user="root")
+                        env=dict(SUDO_UID="%d"%(src_uid), DESTDIR=dest_dir.path, SRC=self.source.path), as_user="root")
         return dest_dir
 
     @cached_property
