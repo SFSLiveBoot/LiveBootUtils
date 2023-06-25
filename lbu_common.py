@@ -125,12 +125,12 @@ def cli_func(func=None, name=None, parse_argv=None, desc=None):
     func.cli_call=cli_call
     if not func.__doc__:
         import inspect
-        spec=inspect.getargspec(func)
+        spec=inspect.getfullargspec(func)
         rev_args=list(reversed(spec.args))
         defaults=dict([(rev_args[i_d[0]], i_d[1]) for i_d in enumerate(reversed(spec.defaults))]) if spec.defaults else {}
         func.__doc__=" ".join(["[<%s>=%r]"%(n, defaults[n]) if n in defaults else "<%s>"%n for n in spec.args]+
                               (["[<%s>...]"%spec.varargs] if spec.varargs else [])+
-                              (["[<%s>=<value>...]"%spec.keywords] if spec.keywords else []))
+                              (["[<%s>=<value>...]"%spec.varkw] if spec.varkw else []))
     return func
 cli_func.commands={}
 
