@@ -162,11 +162,6 @@ class CLIProgressReporter(object):
         self.output_stream.flush()
 
 pr_cls = CLIProgressReporter
-try:
-    lxc_v3 = os.popen('lxc-info --version').read().split('.')[0] in ('3', '4')
-except OSError as e:
-    warn("Cannot get LXC version: %s", e)
-
 
 class TemplatedString(object):
     template = ""
@@ -215,29 +210,21 @@ class LXC(object):
             return "%r -> %r%s"%(self.src, self.dst, " [RO]" if self.ro else "")
 
     class Config(TemplatedString):
-        template = ("""
+        template = """
 lxc.uts.name = %(name)s
 lxc.rootfs.path = %(rootfs)s
 lxc.pty.max = 1024
 %(apparmor_cfg)s
 
-lxc.log.level = 1""" if lxc_v3 else """
-lxc.utsname = %(name)s
-lxc.rootfs = %(rootfs)s
-lxc.pts = 1024
-lxc.kmsg = 0
-
-lxc.loglevel = 1
-""") + """
+lxc.log.level = 1
 lxc.autodev = %(autodev)s
 lxc.mount.auto = proc sys
-lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(sfs_parts)s"'
 
 # use .drop instead of .keep if you want less restritive environment
 %(cap_cfg)s
 %(dev_cfg)s
 %(extra_config)s
-        """
+"""
 
         @cached_property
         def apparmor_profile(self):
@@ -289,7 +276,16 @@ lxc.hook.pre-mount = /bin/sh -c 'exec %(lbu_cli)s mount-combined %(rootfs)s "%(s
 
         @cached_property
         def rootfs(self):
-            return "/run/lxc/root/%s" % (self.name,)
+            root_parts = []
+            for part in self.all_parts:
+                if isinstance(part, SFSFile):
+                    root_parts.append(part.mounted_path.path)
+                else:
+                    root_parts.append(part.path)
+            part.join("work").makedirs()
+            part.join("data").makedirs()
+            root_parts[-1:] = [part.join("data").path]
+            return "overlayfs:" + ":".join(root_parts)
 
         @cached_property
         def extra_config(self):
@@ -321,29 +317,22 @@ lxc.net.%(netnum)d.flags = up
 %(link_cfg)s
 %(ip_cfg)s
 %(gw_cfg)s
-lxc.net.%(netnum)d.script.up = /bin/sh -c '%(veth_up_script)s'""" if lxc_v3 else """
-lxc.network.type = veth
-lxc.network.flags = up
-%(link_cfg)s
-%(ip_cfg)s
-%(gw_cfg)s
-lxc.network.script.up = /bin/sh -c '%(veth_up_script)s'"""
-            veth_up_script = os.environ.get("LXC_VETH_UP_SCRIPT", 'iface="$4"; link="$(grep -lFx "$(ethtool -S "$iface" | grep peer_ifindex | tr -dc 0-9)" /sys/class/net/*/ifindex | cut -f5 -d/)"; ethtool -K "$link" tx-checksum-ip-generic off')
+"""
             link = None
             ip = None
             gw = None
 
             @cached_property
             def link_cfg(self):
-                return (("lxc.net.%(netnum)d.link = %(link)s" if lxc_v3 else "lxc.network.link = %(link)s") % self) if self.link else ""
+                return (("lxc.net.%(netnum)d.link = %(link)s") % self) if self.link else ""
 
             @cached_property
             def ip_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s" ) % self) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s") % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s" if lxc_v3 else "lxc.network.ipv4.gateway = %(gw)s") % self) if self.gw else ""
+                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s") % self) if self.gw else ""
 
             def __init__(self, link, ip=None, gw=None, netnum=0):
                 TemplatedString.__init__(self, link=link, ip=ip, gw=gw, netnum=netnum)
@@ -361,11 +350,11 @@ lxc.net.%(netnum)d.link = %(link)s
 
             @cached_property
             def ip_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s" if lxc_v3 else "lxc.network.ipv4 = %(ip)s") % self) if self.ip else ""
+                return (("lxc.net.%(netnum)d.ipv4.address = %(ip)s") % self) if self.ip else ""
 
             @cached_property
             def gw_cfg(self):
-                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s" if lxc_v3 else "lxc.network.ipv4.gateway = %(gw)s") % self) if self.gw else ""
+                return (("lxc.net.%(netnum)d.ipv4.gateway = %(gw)s") % self) if self.gw else ""
 
             def __init__(self, link, ip=None, gw=None, netnum=0):
                 TemplatedString.__init__(self, link=link, ip=ip, gw=gw, netnum=netnum)
@@ -393,7 +382,7 @@ lxc.net.%(netnum)d.link = %(link)s
             self.extra_parts.append(self.MountEntry(src, dst, ro))
 
         def add_hostnet(self):
-            self.extra_parts.append("lxc.net.%d.type=none" % (self.netnum, ) if lxc_v3 else "lxc.network.type=none")
+            self.extra_parts.append("lxc.net.%d.type=none" % (self.netnum, ))
             self.netnum+=1
 
     def __init__(self, name=None, **attrs):
@@ -475,7 +464,7 @@ lxc.net.%(netnum)d.link = %(link)s
             if isinstance(part, SFSFile):
                 if part.mounted_path is None:
                     part.mount()
-        cfg = LXC.Config(name, sfs_parts=" ".join([p.realpath().path for p in all_parts]))
+        cfg = LXC.Config(name, all_parts=all_parts)
         if "devices_allow" in attrs:
             cfg.devices_allow = attrs.pop("devices_allow")
         if veth is None and vlan is None and not nonet:
