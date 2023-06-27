@@ -929,6 +929,15 @@ class FSPath(object):
     def exists(self):
         return os.path.exists(self.path)
 
+    def islink(self):
+        return os.path.islink(self.path)
+
+    def lstat(self):
+        return os.lstat(self.path)
+
+    def stat(self):
+        return os.stat(self.path)
+
     @cached_property
     def create_stamp(self):
         return int(os.stat(self.path).st_mtime)
@@ -951,7 +960,7 @@ class FSPath(object):
         if not self.mountpoint.fs_type == 'aufs':
             raise NotAufs('Not located at aufs mountpoint')
         for aufs_part in self.mountpoint.aufs_components:
-            test_file = aufs_part.join(self.realpath().path)
+            test_file = aufs_part.join(self.path)
             if test_file.exists:
                 return test_file
 
@@ -1068,12 +1077,12 @@ class FSPath(object):
 
     @cached_property
     def mountpoint(self):
-        orig_dev=os.stat(self.path).st_dev
-        path_components=os.path.realpath(self.path).split(os.path.sep)
-        sub_paths=[os.path.sep.join(path_components[:n+1]) or os.path.sep for n in range(len(path_components))]
+        orig_dev=self.lstat().st_dev
+        path_components=(self.path if self.islink() else self.realpath().path).split(os.path.sep)
+        sub_paths=[FSPath(os.path.sep.join(path_components[:n+1]) or os.path.sep) for n in range(len(path_components))]
         cur_path=self.path
         for test_path in reversed(sub_paths):
-            if not os.stat(test_path).st_dev==orig_dev:
+            if not test_path.lstat().st_dev==orig_dev:
                 break
             cur_path=test_path
         return MountPoint(cur_path)
