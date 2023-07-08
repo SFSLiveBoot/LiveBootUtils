@@ -36,6 +36,7 @@ test -z "$required_debs" || apt-get ${target_dist:+-t $target_dist} download --p
   test -z "$show_only" || { echo; continue; }
   case "$url" in
     file:///*) deb_file="${url#file://}" ;;
+    file:/*) deb_file="${url#file:}" ;;
     https://*|http://*|ftp://*)
       test -s "$cache_dir/$fname" || {
         touch "$cache_dir/$fname"
