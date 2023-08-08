@@ -454,6 +454,10 @@ cmpdirs() {
   env dir2="$dir2" dir1="${dir1%/}" find "$dir1" -not -type d "$@" -exec sh -c 'for f1;do n="${f1#$dir1/}";f2="${dir2%/}/$n"; if test -L "$f1" -o -L "$f2";then test "$(readlink "$f1")" = "$(readlink "$f2")" || echo "$n";else cmp -s "$f1" "$f2" || echo "$n";fi;done' a {} +
 }
 
+cmpsfsdst() {
+  find "$DESTDIR" -not -type d -not -type l -exec sh -c 'cd "$DESTDIR"; for f;do diff -u "${f#$DESTDIR/}" "/${f#$DESTDIR/}";done' a {} +
+}
+
 enter_chroot() {
   local unshare retval=0 mods d x lsof_out
   while true;do
