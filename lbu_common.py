@@ -965,6 +965,17 @@ class FSPath(object):
                 return test_file
 
     @cached_property
+    def component_files(self):
+        ret = []
+        for fs_part in self.mountpoint.fs_components:
+            test_file = fs_part.join(self.path)
+            if test_file.exists:
+                ret.append(test_file)
+            else:
+                warn("file %r does not exist", test_file.path)
+        return tuple(ret)
+
+    @cached_property
     def parent_directory(self):
         return FSPath(self._parent_path)
 
@@ -1630,6 +1641,22 @@ class MountPoint(FSPath):
             branch_dir, branch_mode=open(branch_file).read().strip().rsplit("=", 1)
             components.append(FSPath(branch_dir, aufs_mode=branch_mode, aufs_index=int(branch_file[len(glob_prefix):])))
         return components
+    
+    @cached_property
+    def overlay_components(self):
+        dirs = []
+        for opt in self.mount_options:
+            if opt.startswith("lowerdir="):
+                dirs.extend(map(lambda d: FSPath(d), opt[9:].split(":")))
+            elif opt.startswith("upperdir="):
+                dirs.insert(0, FSPath(opt[9:]))
+        return dirs
+
+    @cached_property
+    def fs_components(self):
+        if self.fs_type=="aufs": return self.aufs_components
+        elif self.fs_type=="overlay": return self.overlay_components
+        else: raise NotAufs("Need aufs or overlay mountpoint")
 
     def __contains__(self, item):
         if isinstance(item, str):
@@ -1931,12 +1958,12 @@ class BootDirBuilder(FSPath):
         self.build_lxc.run(cmd, env=self.run_env, show_output=True)
 
 
-@cli_func(desc="List AUFS original components")
-def aufs_components(directory='/'):
+@cli_func(desc="List AUFS/OverlayFS original components")
+def list_components(directory='/'):
     fn_ts_re = re.compile(r'^(.+)\.([0-9]+)$')
     ret = []
     mntpnt=MountPoint(directory)
-    for c in mntpnt.aufs_components:
+    for c in mntpnt.component_files:
         c_mnt=c.mountpoint
         try: lbe=c_mnt.loop_backend
         except NotLoopDev:
@@ -2340,4 +2367,4 @@ def prune_old_sfs(path):
 @cli_func(desc="locate original path for file in combined fs")
 def locate_orig(path):
     f = FSPath(path)
-    return f.aufs_original.path
+    return [f1.path for f1 in f.component_files]
