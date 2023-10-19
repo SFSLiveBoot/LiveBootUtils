@@ -1376,6 +1376,7 @@ class SFSFile(FSPath):
 
     progress_cb=None
     chunk_size=8192
+    fsync_size=int(os.environ.get('SFS_FSYNC_SIZE', '0x1000000'), 0)
     auto_unmount = False
 
     class SFSBasename(str):
@@ -1540,6 +1541,7 @@ class SFSFile(FSPath):
         dst_temp="%s.NEW.%s"%(self.path, os.getpid())
         dst_fobj=open(dst_temp, "wb")
         create_stamp=None
+        not_synced=0
         with other.open() as src_fobj:
             nbytes=0
             if progress_cb: progress_cb(nbytes)
@@ -1551,8 +1553,14 @@ class SFSFile(FSPath):
                     create_stamp=self._get_create_stamp(data)
                 nbytes+=len(data)
                 dst_fobj.write(data)
+                not_synced+=len(data)
+                if self.fsync_size>0 and not_synced>=self.fsync_size:
+                    os.fsync(dst_fobj.fileno())
+                    not_synced=0
                 if progress_cb: progress_cb(nbytes)
             if progress_cb: progress_cb(None)
+        if self.fsync_size>0 and not_synced>0:
+            os.fsync(dst_fobj.fileno())
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
         sfs_finder.register_sfs(self)
