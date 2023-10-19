@@ -1366,6 +1366,35 @@ class Downloader(object):
 
 dl = Downloader()
 
+class ChecksumFile(FSPath):
+    std_name = "sha256sum.txt"
+
+    def update(self, target, checksum):
+        relpath = os.path.relpath(target.path, self.parent_directory.path)
+        with self.open("r+") as f:
+            while True:
+                pos = f.tell()
+                line = f.readline()
+                if line=='':
+                    print(f"{checksum}  {relpath}", file=f)
+                    break
+                f_checksum, f_name = line.split()
+                if f_name == relpath:
+                    if f_checksum!=checksum:
+                        f.seek(pos)
+                        f.write(checksum)
+                    break
+
+    @classmethod
+    def find_in_parents_of(cls, target):
+        fs_dir = target.parent_directory
+        while True:
+            test_file = fs_dir.join(cls.std_name)
+            if test_file.exists:
+                return cls(test_file.path)
+            fs_dir=fs_dir.parent_directory
+            if not fs_dir.path or fs_dir.path=="/":
+                break
 
 class SFSFile(FSPath):
     UPTDCHECK_PATH = os.path.join(SFSBuilder.SFS_SRC_D, '.check-up-to-date')
@@ -1378,6 +1407,8 @@ class SFSFile(FSPath):
     chunk_size=8192
     fsync_size=int(os.environ.get('SFS_FSYNC_SIZE', '0x1000000'), 0)
     auto_unmount = False
+    checksum_algo = hashlib.sha256
+    checksum_file = None
 
     class SFSBasename(str):
         def strip_down(self):
@@ -1542,6 +1573,7 @@ class SFSFile(FSPath):
         dst_fobj=open(dst_temp, "wb")
         create_stamp=None
         not_synced=0
+        checksum = self.checksum_algo()
         with other.open() as src_fobj:
             nbytes=0
             if progress_cb: progress_cb(nbytes)
@@ -1554,6 +1586,7 @@ class SFSFile(FSPath):
                 nbytes+=len(data)
                 dst_fobj.write(data)
                 not_synced+=len(data)
+                checksum.update(data)
                 if self.fsync_size>0 and not_synced>=self.fsync_size:
                     os.fsync(dst_fobj.fileno())
                     not_synced=0
@@ -1563,6 +1596,9 @@ class SFSFile(FSPath):
             os.fsync(dst_fobj.fileno())
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
+        info("File digest: %s", checksum.hexdigest())
+        if self.checksum_file:
+            self.checksum_file.update(self, checksum.hexdigest())
         sfs_finder.register_sfs(self)
 
     @cached_property
@@ -2235,6 +2271,13 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                 print(sfs.path)
                 continue
             dst_sfs = sfs.curlink_sfs()
+            cksum_file = os.environ.get("SFS_CHECKSUM_FILE", None)
+            if cksum_file=="": pass
+            elif cksum_file is None:
+                cksum_file = ChecksumFile.find_in_parents_of(dst_sfs)
+            else: cksum_file = ChecksumFile(cksum_file)
+            if cksum_file:
+                dst_sfs.checksum_file=cksum_file
             if source_dir=='--auto-rebuild':
                 if dst_sfs.git_source:
                     info("Git repo for %s: %s", dst_sfs.basename, dst_sfs.git_source)
