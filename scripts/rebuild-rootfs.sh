@@ -19,11 +19,24 @@ test $# -ge 1 || {
 output_sfs="$1"
 shift
 
+test -n "${need_remount+set}" || {
+  vfs_opts="$(findmnt -n -o VFS-OPTIONS --target .)"
+  case ",$vfs_opts," in
+    *,nosuid,*|*,nodev,*) need_remount=yes ;;
+  esac
+}
+
 tmp_d="$(mktemp -d "$wd/tmp-XXX")"
 trap 'st="$?";echo Clean up with: sudo rm -r "${tmp_d#$wd/}" >&2;exit "$st"' EXIT INT
 r sudo install -d -o root -g root -m 0755 "$tmp_d" "$tmp_d/rw" "$tmp_d/dst" "$wd/cache"
 
+test "${need_remount:-no}" = "no" ||
+  r sudo mount -o remount,suid,dev "$(findmnt -n -o TARGET --target .)"
+
 # shellcheck disable=SC2086
 r sudo LBU_CACHE_DIR="$wd/cache" LXC_DESTDIR="$tmp_d/rw" LXC_RW_D="$tmp_d/dst" $lbu_cli rebuild-sfs "$output_sfs" "$root_repo" "$@"
 r sudo rm -rf "$tmp_d"
+
+test "${need_remount:-no}" = "no" ||
+  r sudo mount -o "remount,$vfs_opts" "$(findmnt -n -o TARGET --target .)"
 trap - EXIT INT
