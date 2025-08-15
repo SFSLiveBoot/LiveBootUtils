@@ -753,6 +753,25 @@ class SFSBuilder(object):
         script = self.run_env.get("BUILD_SCRIPT")
         if "BUILD_SCRIPT" in self.run_env:
             self.run_in_dest(["sh", "-c", self.run_env["BUILD_SCRIPT"]], show_output=True)
+
+        if self.sfs_src_d.join(".sources").exists:
+            sources_file = self.lxc_setup_d.join(
+                "etc", "apt", "sources.list.d", "build-sfs.sources"
+            )
+            sources_file.parent_directory.makedirs()
+            with sources_file.open("w") as sources_f:
+                sources_f.write(self.sfs_src_d.join(".sources").open("r").read())
+                if self.sfs_src_d.join(".repo-key-url").exists:
+                    repo_key_url = (
+                        self.sfs_src_d.join(".repo-key-url").open("r").read().strip()
+                    )
+                    with urllib.request.urlopen(repo_key_url) as key_f:
+                        sources_f.write("Signed-By:\n")
+                        for line in key_f:
+                            sources_f.write(
+                                " " + (line.decode("utf8") if line != b"\n" else ".\n")
+                            )
+
         for script in sorted(self.sfs_src_d.walk(pattern="[0-9][0-9]-*"), key=lambda p: p.basename):
             if not apt_updated:
                 self.run_in_dest(["apt-get", "update"], show_output=True)
@@ -769,6 +788,29 @@ class SFSBuilder(object):
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
                 raise BuildAborted()
+
+        if not apt_updated and self.sfs_src_d.join(".pkgs").exists:
+            self.run_in_dest(["apt-get", "update"], show_output=True)
+            apt_updated = True
+            with self.sfs_src_d.join(".pkgs").open("r") as pkgs_f:
+                pkgs = []
+                for line in pkgs_f:
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    pkgs.extend((p for p in line.split() if p))
+                if pkgs:
+                    try:
+                        self.run_in_dest(
+                            [self.LXC_LBU + "/scripts/apt-sfs.sh", self.LXC_DESTDIR]
+                            + pkgs,
+                            show_output=True,
+                        )
+                    except CommandFailed as e:
+                        warn("Installing packages %r failed with %d", pkgs, e.args[1])
+                        if sys.stdin.isatty():
+                            self.run_in_dest(["bash", "-i"], show_output=True)
+                        raise BuildAborted()
+
         if "LAST_BUILD_SCRIPT" in self.run_env:
             script = self.run_env.get("LAST_BUILD_SCRIPT")
             self.run_in_dest(["sh", "-c", self.run_env["LAST_BUILD_SCRIPT"]], show_output=True)
