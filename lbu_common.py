@@ -16,6 +16,9 @@ from functools import reduce
 lbu_cache_dir = os.environ.get("LBU_CACHE_DIR", os.path.expanduser("~/.cache/lbu") if os.getuid() else "/var/cache/lbu")
 lbu_dir = os.path.dirname(__file__)
 
+__version__ = "0.1.0"
+lbu_http_agent = os.environ.get("LBU_HTTP_AGENT", "LiveBootUtils/" + __version__)
+
 no_exceptions = os.environ.get("LBU_NO_EXCEPTIONS")
 
 class CommandFailed(EnvironmentError): pass
@@ -765,7 +768,11 @@ class SFSBuilder(object):
                     repo_key_url = (
                         self.sfs_src_d.join(".repo-key-url").open("r").read().strip()
                     )
-                    with urllib.request.urlopen(repo_key_url) as key_f:
+                    with urllib.request.urlopen(
+                        urllib.request.Request(
+                            repo_key_url, headers={"User-Agent": lbu_http_agent}
+                        )
+                    ) as key_f:
                         sources_f.write("Signed-By:\n")
                         for line in key_f:
                             sources_f.write(
