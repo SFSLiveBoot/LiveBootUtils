@@ -592,6 +592,8 @@ class SFSBuilder(object):
     dest_dir_parent = os.path.join(lbu_cache_dir, "rebuild")
     default_lxc_parts = os.environ.get('LXC_BUILD_SFS_PARTS', '00-* scripts settings').split()
 
+    USRMERGE_DIRS = os.environ.get("LXC_USRMERGE_DIRS", "lib bin sbin lib32 lib64 libx32").split()
+
     def __init__(self, target_sfs, source=None):
         if not isinstance(target_sfs, SFSFile):
             target_sfs = SFSFile(target_sfs)
@@ -826,6 +828,17 @@ class SFSBuilder(object):
             if sys.stdin.isatty():
                 info("Modify $DESTDIR using interactive shell.")
                 self.build_shell()
+
+        if os.getenv("USRMERGE", "1"):
+            for usrmerge_dir_name in self.USRMERGE_DIRS:
+                usrmerge_dir = self.dest_dir.join(usrmerge_dir_name)
+                if usrmerge_dir.isdir() and not usrmerge_dir.islink():
+                    self.dest_dir.join("usr").makedirs()
+                    usrmerge_dir.recursive_move_to(
+                        self.dest_dir.join("usr", usrmerge_dir_name)
+                    )
+                    usrmerge_dir.symlink_create("usr/" + usrmerge_dir_name)
+
         if os.environ.get("POST_BUILD_SHELL"):
             self.build_shell()
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
@@ -977,6 +990,29 @@ class FSPath(object):
     @property
     def exists(self):
         return os.path.exists(self.path)
+
+    def recursive_move_to(self, dst):
+        if dst.isdir():
+            for f in self.listdir():
+                f.recursive_move_to(dst.join(f.basename))
+            self.rmdir()
+        else:
+            self.rename(dst)
+
+    def rename(self, dst):
+        return os.rename(self.path, dst.path)
+
+    def rmdir(self):
+        return os.rmdir(self.path)
+
+    def listdir(self):
+        return (self.join(p) for p in os.listdir(self.path))
+
+    def isdir(self):
+        return os.path.isdir(self.path)
+
+    def symlink_create(self, target):
+        return os.symlink(target, self.path)
 
     def islink(self):
         return os.path.islink(self.path)
