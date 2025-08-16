@@ -1483,6 +1483,7 @@ class ChecksumFile(FSPath):
 
 class SFSFile(FSPath):
     UPTDCHECK_PATH = os.path.join(SFSBuilder.SFS_SRC_D, '.check-up-to-date')
+    GET_LATEST_STAMP_PATH = os.path.join(SFSBuilder.SFS_SRC_D, ".get-latest-stamp")
     GIT_SOURCE_PATH = SFSBuilder.GIT_SOURCE_PATH
     GIT_COMMIT_PATH = SFSBuilder.GIT_COMMIT_PATH
     BUILD_ENV_PATH = SFSBuilder.BUILD_ENV_PATH
@@ -1599,26 +1600,53 @@ class SFSFile(FSPath):
         return dl.dl_file(self.git_source if self.git_branch is None else '%s#%s' % (
             self.git_source, self.git_branch))
 
+    def run_check_command(self, script, show_ouput=True):
+        if self.mounted_path is None:
+            self.mount()
+
+        run_env = dict(
+            dl.proxy_env,
+            DESTDIR=self.mounted_path.path,
+            dl_cache_dir=dl.cache_dir,
+            lbu=FSPath(__file__).parent_directory.path,
+        )
+
+        try:
+            run_env.update(
+                _load_build_env(self.open_file(self.BUILD_ENV_PATH, "r").read())
+            )
+        except IOError:
+            pass
+
+        return run_command(
+            [self.mounted_path.join(script).path], show_output=show_ouput, env=run_env
+        )
+
     @cached_property
     def latest_stamp(self):
         if self.git_source:
             if not self.git_commit == self.git_repo.last_commit:
                 return self.git_repo.last_stamp
-        try: self.open_file(self.UPTDCHECK_PATH)
+
+        try:
+            self.open_file(self.GET_LATEST_STAMP_PATH)
+        except IOError:
+            pass
+        else:
+            return int(
+                self.run_check_command(self.GET_LATEST_STAMP_PATH, show_ouput=False)
+            )
+
+        try:
+            self.open_file(self.UPTDCHECK_PATH)
         except IOError:
             return self.create_stamp
+        else:
+            try:
+                self.run_check_command(self.UPTDCHECK_PATH)
+            except CommandFailed:
+                return int(time.time())
 
-        if self.mounted_path == None:
-            self.mount()
-        try:
-            run_env = dict(dl.proxy_env, DESTDIR=self.mounted_path.path, dl_cache_dir=dl.cache_dir,
-                           lbu=FSPath(__file__).parent_directory.path)
-            try: run_env.update(_load_build_env(self.open_file(self.BUILD_ENV_PATH, "r").read()))
-            except IOError: pass
-            run_command([self.mounted_path.join(self.UPTDCHECK_PATH).path],
-                        show_output=True, env=run_env)
-        except CommandFailed:
-            return int(time.time())
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
 
     def open_file(self, path, *args, **kwargs):
