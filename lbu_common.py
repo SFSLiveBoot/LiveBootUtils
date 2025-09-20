@@ -32,6 +32,23 @@ class NotLoopDev(ValueError): pass
 class NotSFS(ValueError): pass
 class BadArgumentsError(ValueError): pass
 
+try:
+    import ctypes
+    import ctypes.util
+
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.mount.argtypes = (
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_ulong,
+        ctypes.c_char_p,
+    )
+except Exception as e:
+    warn(f"could not import libc: {e}")
+    libc = None
+
+
 class UTC(datetime.tzinfo):
     def utcoffset(self, dt):
         return datetime.timedelta(0)
@@ -1750,21 +1767,69 @@ class MountPoint(FSPath):
             return
         run_command(["umount", "-l", self.path], as_user="root")
 
-    def mount(self, src, *opts, **kwargs):
-        if not os.path.exists(self.path):
-            os.makedirs(self.path, 0o755)
+    def _mount_exec(self, src, *opts, **kwargs):
         cmd=["mount", src, self.path]
         if kwargs.pop("bind", False):
             cmd.append("--bind")
         fs_type = kwargs.pop("fs_type", False)
         if fs_type:
             cmd.extend(["-t", fs_type])
-        auto_remove = kwargs.pop("auto_remove", False)
-        if auto_remove:
-            self._remove_on_del = True
         if opts or kwargs:
             cmd.extend(["-o", ",".join(list(opts) + ["%s=%s"%(k, kwargs[k]) for k in kwargs])])
         run_command(cmd, as_user='root')
+
+    _libc_mount_flags = dict(
+        ro=1 << 0,
+        nosuid=1 << 1,
+        nodev=1 << 2,
+        noexec=1 << 3,
+        sync=1 << 4,
+        remount=1 << 5,
+        dirsync=1 << 7,
+        nosymfollow=1 << 8,
+        noatime=1 << 10,
+        nodiratime=1 << 11,
+        bind=1 << 12,
+        move=1 << 13,
+        verbose=1 << 14,
+        silent=1 << 15,
+    )
+
+    def _mount_libc(self, src, *opts, **kwargs):
+        flags = 0
+
+        for flag_name in self._libc_mount_flags:
+            if flag_name in opts:
+                opts = [o for o in opts if o != flag_name]
+                flags |= self._libc_mount_flags[flag_name]
+            if flag_name in kwargs:
+                if kwargs.pop(flag_name, False):
+                    flags |= self._libc_mount_flags[flag_name]
+
+        fs = kwargs.pop("fs_type") if "fs_type" in kwargs else "auto"
+
+        options = ",".join(list(opts) + ["%s=%s" % (k, kwargs[k]) for k in kwargs])
+
+        ret = libc.mount(
+            src.encode(), self.path.encode(), fs.encode(), flags, options.encode()
+        )
+
+        if ret < 0:
+            errno = ctypes.get_errno()
+            message = f"Error mounting '{src}' to '{self}' as '{fs}' with options '{options}': {os.strerror(errno)}"
+            raise OSError(errno, message)
+
+    def mount(self, src, *opts, **kwargs):
+        if not os.path.exists(self.path):
+            os.makedirs(self.path, 0o755)
+        auto_remove = kwargs.pop("auto_remove", False)
+        if auto_remove:
+            self._remove_on_del = True
+
+        if libc is not None and "loop" not in opts and "loop" not in kwargs:
+            return self._mount_libc(src, *opts, **kwargs)
+        else:
+            return self._mount_exec(src, *opts, **kwargs)
 
     def remove_on_delete(self, value=True):
         self._remove_on_del = value
