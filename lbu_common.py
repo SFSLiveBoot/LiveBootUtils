@@ -856,6 +856,8 @@ class SFSBuilder(object):
                     )
                     usrmerge_dir.symlink_create("usr/" + usrmerge_dir_name)
 
+        self.dest_dir.chmod(0o755)
+
         if os.environ.get("POST_BUILD_SHELL"):
             self.build_shell()
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
@@ -1015,6 +1017,9 @@ class FSPath(object):
             self.rmdir()
         else:
             self.rename(dst)
+
+    def chmod(self, mode):
+        return os.chmod(self.path, mode)
 
     def rename(self, dst):
         return os.rename(self.path, dst.path)
