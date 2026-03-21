@@ -1186,8 +1186,32 @@ class SFSBuilder(object):
             self.dest_dir.open_file(self.BUILD_ENV_PATH, "w").write(
                 "\n".join(["%s=%s" % (k_v[0], k_v[1]) for k_v in env_mod])
             )
-        run_command(cmd, show_output=True)
+        remount_ro = False
+        try:
+            run_command(cmd, show_output=True)
+        except CommandFailed as e:
+            warning("Command failed with: %s", e.stderr)
+            if e.stderr.endswith("Read-only file system") and sys.stdin.isatty():
+                target_mnt = self.target.mountpoint
+                yesno = input(
+                    f"Try again with temporarily remounting {target_mnt} read-write? [Y/n] "
+                )
+                if yesno == "" or yesno.lower().startswith("y"):
+                    run_command(["mount", "-o", "remount,rw", target_mnt.path])
+                    remount_ro = True
+                    run_command(cmd, show_output=True)
+                else:
+                    if remount_ro:
+                        try:
+                            run_command(["mount", "-o", "remount,ro", target_mnt.path])
+                        except Exception:
+                            pass
+                    raise
+            else:
+                raise
         self.target.replace_file(dst_temp)
+        if remount_ro:
+            run_command(["mount", "-o", "remount,ro", target_mnt.path])
         sfs_finder.register_sfs(self.target)
 
 
