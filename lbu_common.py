@@ -1145,6 +1145,9 @@ class SFSBuilder(object):
 
         if os.environ.get("POST_BUILD_SHELL"):
             self.build_shell()
+        self.make_sfs()
+
+    def make_sfs(self):
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
         cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
         if self.source is not None:
@@ -2994,6 +2997,14 @@ def rebuild_sfs(target, source=None, *env_vars):
         k, v = kv.split("=", 1)
         env[k] = v
     sfs.rebuild_and_replace(source, env=env)
+
+
+@cli_func(desc="add file to existing sfs")
+def cp2sfs(target, *files):
+    sfs = SFSFile(target)
+    builder = SFSBuilder(sfs)
+    run_command(["cp", "--parents", "-avt", builder.dest_dir.path] + list(files))
+    builder.make_sfs()
 
 
 def _sfs_nfo_func(fname):
