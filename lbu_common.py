@@ -19,7 +19,7 @@ import datetime
 import pwd
 
 import hashlib
-from logging import warn, info, debug
+from logging import warning, info, debug
 from functools import reduce
 
 lbu_cache_dir = os.environ.get(
@@ -75,7 +75,7 @@ try:
         ctypes.c_char_p,
     )
 except Exception as e:
-    warn(f"could not import libc: {e}")
+    warning(f"could not import libc: {e}")
     libc = None
 
 
@@ -688,7 +688,7 @@ lxc.net.%(netnum)d.link = %(link)s
                 ),
             )
         except CommandFailed as e:
-            warn("Starting LXC instance %r failed: %r", self.name, e)
+            warning("Starting LXC instance %r failed: %r", self.name, e)
             if sys.stdin.isatty():
                 breakpoint()
             raise
@@ -716,7 +716,7 @@ lxc.net.%(netnum)d.link = %(link)s
                 **args,
             )
         except CommandFailed as e:
-            warn("Command %r failed with %d", cmd, e.args[1])
+            warning("Command %r failed with %d", cmd, e.args[1])
             args.setdefault("show_output", True)
             if "LXC_RUN_FAILSCRIPT" in os.environ:
                 run_command(
@@ -1018,7 +1018,7 @@ class SFSBuilder(object):
                 ),
             )
         except CommandFailed as e:
-            warn("Build aborted from shell (exit status: %s)", e.args[1])
+            warning("Build aborted from shell (exit status: %s)", e.args[1])
             raise BuildAborted()
 
     def build(self):
@@ -1089,7 +1089,7 @@ class SFSBuilder(object):
             try:
                 self.run_in_dest(cmd, show_output=True)
             except CommandFailed as e:
-                warn("Script %r failed with %d", script.basename, e.args[1])
+                warning("Script %r failed with %d", script.basename, e.args[1])
                 if sys.stdin.isatty():
                     self.run_in_dest(["bash", "-i"], show_output=True)
                 raise BuildAborted()
@@ -1111,7 +1111,9 @@ class SFSBuilder(object):
                             show_output=True,
                         )
                     except CommandFailed as e:
-                        warn("Installing packages %r failed with %d", pkgs, e.args[1])
+                        warning(
+                            "Installing packages %r failed with %d", pkgs, e.args[1]
+                        )
                         if sys.stdin.isatty():
                             self.run_in_dest(["bash", "-i"], show_output=True)
                         raise BuildAborted()
@@ -1122,7 +1124,7 @@ class SFSBuilder(object):
                 ["sh", "-c", self.run_env["LAST_BUILD_SCRIPT"]], show_output=True
             )
         if script is None and self.source is None:
-            warn(
+            warning(
                 "No scripts found and no source given. No modifications will happen by default."
             )
             if sys.stdin.isatty():
@@ -1158,7 +1160,7 @@ class SFSBuilder(object):
                         ["sh", "-c", 'cd "$DESTDIR"; setfacl --restore=.git-facls']
                     )
                 except CommandFailed as e:
-                    warn("setfacl failed: %r", e.args[2])
+                    warning("setfacl failed: %r", e.args[2])
             sqfs_excl = self.source.join(self.SQFS_EXCLUDE)
             if sqfs_excl.exists:
                 cmd.extend(["-wildcards", "-ef", sqfs_excl.path])
@@ -1255,7 +1257,7 @@ class SFSDirectory(object):
             try:
                 tgt.unlink()
             except OSError as e:
-                warn("Could not unlink %r: %s", tgt.path, e)
+                warning("Could not unlink %r: %s", tgt.path, e)
 
 
 class SFSDirectoryAufs(SFSDirectory):
@@ -1413,7 +1415,7 @@ class FSPath(object):
             if test_file.exists:
                 ret.append(test_file)
             else:
-                warn("file %r does not exist", test_file.path)
+                warning("file %r does not exist", test_file.path)
         return tuple(ret)
 
     @cached_property
@@ -1631,7 +1633,7 @@ class FSPath(object):
             try:
                 os.chmod(self.path, old_stat.st_mode)
             except OSError as e:
-                warn("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
+                warning("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
         clear_cached_properties(self)
 
     def unlink(self):
@@ -1671,13 +1673,13 @@ class FSPath(object):
                 try:
                     os.unlink(self.path)
                 except OSError as e:
-                    warn("Cannot unlink %r: %s", self.path, e)
+                    warning("Cannot unlink %r: %s", self.path, e)
             elif os.path.isdir(self.path):
                 try:
                     os.rmdir(self.path)
                 except OSError as e:
                     if not e.errno == errno.ENOTEMPTY:
-                        warn("Cannot rmdir %r: %s", self.path, e)
+                        warning("Cannot rmdir %r: %s", self.path, e)
             else:
                 raise ValueError("Refuse auto-remove files", self)
 
@@ -1829,7 +1831,7 @@ class Downloader(object):
             try:
                 run_command(cmd, cwd=dest_path, env=git_env)
             except CommandFailed as e:
-                warn(
+                warning(
                     "Update failed, will use old cache for %r. Error message: %r",
                     dest_path,
                     e.args[2],
@@ -2998,7 +3000,7 @@ def _sfs_nfo_func(fname):
     try:
         st = os.stat(fname)
     except OSError as e:
-        warn("Failed reading file info: %s", e)
+        warning("Failed reading file info: %s", e)
         return
     ret = dict(
         size=st.st_size,
@@ -3129,7 +3131,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                 continue
             src_sfs = source_dir.find_sfs(dst_sfs.basename)
             if src_sfs is None:
-                warn("Not found from update source, skipping: %s", dst_sfs.basename)
+                warning("Not found from update source, skipping: %s", dst_sfs.basename)
             elif src_sfs.create_stamp > dst_sfs.create_stamp:
                 info(
                     "Replacing %s from %s: %s > %s",
@@ -3147,7 +3149,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                     stamp2txt(src_sfs.create_stamp),
                 )
             else:
-                warn(
+                warning(
                     "Keeping newer %s: %s < %s",
                     dst_sfs.basename,
                     stamp2txt(src_sfs.create_stamp),
@@ -3225,7 +3227,7 @@ def aufs_update_branch(mnt, aufs="/"):
     aufs_mnt = MountPoint(aufs)
     comp_match = [c for c in aufs_mnt.aufs_components if c == mnt]
     if not comp_match:
-        warn(
+        warning(
             "Could not find component path %r in aufs mount %r", mnt.path, aufs_mnt.path
         )
         return
@@ -3235,7 +3237,7 @@ def aufs_update_branch(mnt, aufs="/"):
     cur_comp_match = [c for c in aufs_mnt.aufs_components if c == cur_mnt]
     sfs_mnt = MountPoint(comp_match[0])
     if cur_comp_match:
-        warn(
+        warning(
             "Updated component already included in AUFS (old: %d, new: %d)",
             comp_match[0].aufs_index,
             cur_comp_match[0].aufs_index,
