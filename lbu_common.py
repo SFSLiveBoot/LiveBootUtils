@@ -34,8 +34,22 @@ lbu_http_agent = os.environ.get("LBU_HTTP_AGENT", "LiveBootUtils/" + __version__
 no_exceptions = os.environ.get("LBU_NO_EXCEPTIONS")
 
 
-class CommandFailed(EnvironmentError):
-    pass
+class CommandFailed(Exception):
+    @property
+    def command(self):
+        return self.args[0]
+
+    @property
+    def exit_status(self):
+        return self.args[1]
+
+    @property
+    def stderr(self):
+        return self.args[2]
+
+    @property
+    def stdout(self):
+        return self.args[3]
 
 
 class BuildAborted(RuntimeError):
