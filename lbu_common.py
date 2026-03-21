@@ -1,11 +1,20 @@
 #!/usr/bin/python
 
-import os, sys
-import struct, time, functools
-import fnmatch, glob, re
-import fcntl, errno, select
+import os
+import sys
+import struct
+import time
+import functools
+import fnmatch
+import glob
+import re
+import fcntl
+import errno
+import select
 import subprocess
-import urllib.request, urllib.error, urllib.parse
+import urllib.request
+import urllib.error
+import urllib.parse
 import datetime
 import pwd
 
@@ -785,7 +794,7 @@ sfs_finder = SFSFinder()
 
 
 def _load_build_env(data):
-    return [l.split("=", 1) for l in [v for v in data.split("\n") if v]]
+    return [line.split("=", 1) for line in [v for v in data.split("\n") if v]]
 
 
 class SFSBuilder(object):
@@ -830,7 +839,7 @@ class SFSBuilder(object):
             if (
                 source
                 and target_sfs.git_branch
-                and not "#" in source
+                and "#" not in source
                 and urllib.parse.splittype(source)[0] in ("https", "http", "git")
             ):
                 source = "%s#%s" % (source, target_sfs.git_branch)
@@ -992,7 +1001,7 @@ class SFSBuilder(object):
         return ret
 
     def run_in_dest(self, cmd, **args):
-        if not "env" in args:
+        if "env" not in args:
             args["env"] = self.run_env
         return self.lxc.run(cmd, **args)
 
@@ -1227,7 +1236,7 @@ class SFSDirectory(object):
             except OSError:
                 pass
             else:
-                if not "/" in link_target:
+                if "/" not in link_target:
                     is_current = False
                     old_tgt = old_sfs.parent_directory.join(link_target)
                     if old_tgt.exists:
@@ -2125,7 +2134,7 @@ class SFSFile(FSPath):
         return self.git_repo.last_stamp if self.git_source else self.create_stamp
 
     def open_file(self, path, *args, **kwargs):
-        if self.mounted_path == None:
+        if self.mounted_path is None:
             self.mount()
         return self.mounted_path.open_file(path, *args, **kwargs)
 
@@ -2208,7 +2217,9 @@ _mount_tab = None
 
 def _load_mount_tab():
     global _mount_tab
-    _mount_tab = [l.rstrip("\n").split() for l in reversed(list(open("/proc/mounts")))]
+    _mount_tab = [
+        line.rstrip("\n").split() for line in reversed(list(open("/proc/mounts")))
+    ]
 
 
 class MountPoint(FSPath):
@@ -2448,15 +2459,6 @@ class KVer(object):
     def __str__(self):
         return "-".join([".".join(map(str, v)) for v in self.value])
 
-    def __cmp__(self, other):
-        if isinstance(other, KVer):
-            other = other.value
-        elif isinstance(other, (tuple, list)):
-            pass
-        else:
-            other = KVer(other).value
-        return cmp(self.value, other)
-
 
 class SourceList(FSPath):
     base_url = None
@@ -2640,7 +2642,7 @@ class BootDirBuilder(FSPath):
     def extra_dirs(self):
         ret = []
         for _, sfs_name in self.source_list:
-            if not "/" in sfs_name:
+            if "/" not in sfs_name:
                 continue
             sfs_base = os.path.dirname(sfs_name)
             if sfs_base == self.source_list.arch:
@@ -2943,7 +2945,7 @@ def mnt2dev(mnt, pos=0):
     with open("/proc/mounts") as proc_mounts:
         return list(
             filter(
-                lambda l: l[1] == esc_name,
+                lambda line: line[1] == esc_name,
                 [line.strip().split() for line in proc_mounts],
             )
         )[-1][pos]
