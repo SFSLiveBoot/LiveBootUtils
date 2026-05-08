@@ -1350,15 +1350,7 @@ class FSPath(object):
         if isinstance(path, str) and (
             path.startswith("http://") or path.startswith("https://")
         ):
-            cls = type(
-                "%s_url" % (cls.__name__,),
-                (cls,),
-                dict(
-                    file_size=cached_property(cls._url_file_size),
-                    open=cls._url_open,
-                    _walk_func=cls._url_walk,
-                ),
-            )
+            cls = type(f"{cls.__name__}_url", (FSPathURLMixin, cls), {})
         return object.__new__(cls)
 
     def __init__(self, path, **attrs):
@@ -1477,37 +1469,6 @@ class FSPath(object):
     def open(self, mode="rb"):
         return open(self.path, mode)
 
-    def _url_open(self, mode="rb"):
-        return urllib.request.urlopen(self.path)
-
-    _href_re = re.compile(rb"<a\b[^>]*\bhref=([^\s>]+)[^>]*>")
-    _proto_re = re.compile(r"^\w+:")
-
-    def _url_walk(self, path):
-        resp = urllib.request.urlopen(path)
-        if not resp.code == 200:
-            raise BadArgumentsError("Status code not OK: %s %s" % (resp.code, resp.msg))
-        if not resp.headers.get_content_type() == "text/html":
-            raise BadArgumentsError("not text/html: %r" % (resp.type))
-        dir_names = []
-        file_names = []
-        for href in self._href_re.findall(resp.read()):
-            href = href.decode("utf8")
-            if href.startswith('"') or href.startswith("'"):
-                href = href[1:-1]
-            if (
-                href.startswith("/")
-                or href == "."
-                or href == ".."
-                or self._proto_re.match(href)
-            ):
-                continue
-            if href.endswith("/"):
-                dir_names.append(href)
-            else:
-                file_names.append(href)
-        yield path, dir_names, file_names
-
     def makedirs(self, mode=0o755, sudo=False):
         if not self.exists:
             if sudo:
@@ -1595,10 +1556,6 @@ class FSPath(object):
     def fobj(self):
         return self.open()
 
-    def _url_file_size(self):
-        clen = self.fobj.headers.get("Content-Length")
-        if clen is not None:
-            return int(clen)
 
     @cached_property
     def mountpoint(self):
@@ -1724,6 +1681,44 @@ class FSPath(object):
             else:
                 raise ValueError("Refuse auto-remove files", self)
 
+
+class FSPathURLMixin:
+    _href_re = re.compile(rb"<a\b[^>]*\bhref=([^\s>]+)[^>]*>")
+    _proto_re = re.compile(r"^\w+:")
+
+    def open(self, mode="rb"):
+        return urllib.request.urlopen(self.path)
+
+    def _walk_func(self, path):
+        resp = urllib.request.urlopen(path)
+        if not resp.code == 200:
+            raise BadArgumentsError("Status code not OK: %s %s" % (resp.code, resp.msg))
+        if not resp.headers.get_content_type() == "text/html":
+            raise BadArgumentsError("not text/html: %r" % (resp.type))
+        dir_names = []
+        file_names = []
+        for href in self._href_re.findall(resp.read()):
+            href = href.decode("utf8")
+            if href.startswith('"') or href.startswith("'"):
+                href = href[1:-1]
+            if (
+                href.startswith("/")
+                or href == "."
+                or href == ".."
+                or self._proto_re.match(href)
+            ):
+                continue
+            if href.endswith("/"):
+                dir_names.append(href)
+            else:
+                file_names.append(href)
+        yield path, dir_names, file_names
+
+    @cached_property
+    def file_size(self):
+        clen = self.fobj.headers.get("Content-Length")
+        if clen is not None:
+            return int(clen)
 
 class MountInfo(object):
     def __init__(self, mountinfo="/proc/self/mountinfo"):
