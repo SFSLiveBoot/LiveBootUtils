@@ -1619,6 +1619,7 @@ class FSPath(object):
         try:
             if (
                 os.environ.get("NO_SFS_SYMLINKS")
+                or isinstance(self, FSPathURLMixin)
                 or self.parent_directory.join(".nolinks").exists
             ):
                 self.rename_from(new_name)
@@ -1695,9 +1696,67 @@ class FSPath(object):
 class FSPathURLMixin:
     _href_re = re.compile(rb"<a\b[^>]*\bhref=([^\s>]+)[^>]*>")
     _proto_re = re.compile(r"^\w+:")
+    _write_pid = None
+
+    @property
+    def exists(self):
+        req = urllib.request.Request(self.path, method="HEAD")
+        try:
+            resp = urllib.request.urlopen(req)
+        except urllib.request.HTTPError as e:
+            if e.code == 404:
+                return False
+        return resp.code == 200
 
     def open(self, mode="rb"):
-        return urllib.request.urlopen(self.path)
+        if mode == "rb":
+            return urllib.request.urlopen(self.path)
+        elif mode == "wb":
+            fd_r, fd_w = os.pipe()
+            req = urllib.request.Request(
+                self.path, data=os.fdopen(fd_r, "rb"), method="PUT"
+            )
+            self._write_pid = os.fork()
+            if not self._write_pid:
+                os.close(fd_w)
+                resp = urllib.request.urlopen(req).read()
+                debug("PUT response: %r", resp)
+                os.close(fd_r)
+                exit(0)
+            return os.fdopen(fd_w, "wb")
+        raise ValueError(f"Unknown mode: {mode}")
+
+    @classmethod
+    def _rename_as_move(cls, dst, src):
+        dst_path = dst.path if isinstance(dst, FSPath) else dst
+        my_url = urllib.parse.urlparse(src.path)
+        dst_url = urllib.parse.urlparse(dst_path)
+        if dst_url.netloc != my_url.netloc or dst_url.scheme != my_url.scheme:
+            raise ValueError(
+                f"Not same server: {dst_path} not in {my_url.scheme}://{my_url.netloc}"
+            )
+        req = urllib.request.Request(
+            src.path,
+            method="MOVE",
+            headers={"Destination": dst_url.path},
+        )
+        if src._write_pid:
+            debug("waiting for writing to be finished")
+            os.waitpid(src._write_pid, 0)
+            debug("ok")
+            src._write_pid = None
+        resp = urllib.request.urlopen(req).read()
+        debug("MOVE response: %r", resp)
+
+    def rename(self, dst):
+        return self._rename_as_move(dst, self)
+
+    def rename_from(self, src):
+        if self.exists:
+            self.rename(self.path + f".OLD.{int(time.time())}")
+        return self._rename_as_move(
+            self, src if isinstance(src, FSPath) else FSPath(src)
+        )
 
     def _walk_func(self, path):
         resp = urllib.request.urlopen(path)
@@ -2240,14 +2299,22 @@ class SFSFile(FSPath):
                 not_synced += len(data)
                 checksum.update(data)
                 if self.fsync_size > 0 and not_synced >= self.fsync_size:
-                    os.fsync(dst_fobj.fileno())
+                    dst_fobj.flush()
+                    try:
+                        os.fsync(dst_fobj.fileno())
+                    except OSError:
+                        pass
                     not_synced = 0
                 if progress_cb:
                     progress_cb(nbytes)
             if progress_cb:
                 progress_cb(None)
         if self.fsync_size > 0 and not_synced > 0:
-            os.fsync(dst_fobj.fileno())
+            dst_fobj.flush()
+            try:
+                os.fsync(dst_fobj.fileno())
+            except OSError:
+                pass
         dst_fobj.close()
         self.replace_file(dst_temp, create_stamp)
         info("File digest: %s", checksum.hexdigest())
