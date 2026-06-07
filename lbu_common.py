@@ -1386,7 +1386,13 @@ class FSPath(object):
         return os.chmod(self.path, mode)
 
     def rename(self, dst):
-        return os.rename(self.path, dst.path)
+        return os.rename(self.path, dst.path if isinstance(dst,FSPath) else dst)
+
+    def rename_from(self, src):
+        return os.rename(src.path if isinstance(src,FSPath) else src, self.path)
+
+    def chown(self, uid, gid):
+        os.chown(self.path, uid, gid)
 
     def rmdir(self):
         return os.rmdir(self.path)
@@ -1396,6 +1402,9 @@ class FSPath(object):
 
     def isdir(self):
         return os.path.isdir(self.path)
+
+    def isfile(self):
+        return os.path.isfile(self.path)
 
     def symlink_create(self, target):
         return os.symlink(target, self.path)
@@ -1592,44 +1601,45 @@ class FSPath(object):
     def symlink_target(self):
         return os.readlink(self.path)
 
-    def replace_file(self, temp_filename, change_stamp=None, backup_name=None):
-        is_link = os.path.islink(self.path)
+    def replace_file(self, temp_file, change_stamp=None, backup_name=None):
+        if not isinstance(temp_file, FSPath):
+            temp_file = FSPath(temp_file)
         try:
-            old_stat = os.stat(self.path)
+            old_stat = self.stat()
         except OSError:
             old_stat = None
         if backup_name is None:
             backup_name = "%s.OLD.%s" % (self.path, int(time.time()))
-        if is_link or self.exists:
-            os.rename(self.path, backup_name)
+        if self.islink() or self.exists:
+            self.rename(backup_name)
         if change_stamp is None:
-            change_stamp = os.stat(temp_filename).st_mtime
+            change_stamp = temp_file.stat().st_mtime
         new_name = "%s.%s" % (self.path, int(change_stamp))
-        os.rename(temp_filename, new_name)
+        temp_file.rename(new_name)
         try:
             if (
                 os.environ.get("NO_SFS_SYMLINKS")
                 or self.parent_directory.join(".nolinks").exists
             ):
-                os.rename(new_name, self.path)
+                self.rename_from(new_name)
             else:
                 os.symlink(os.path.basename(new_name), self.path)
         except OSError as e:
             if e.errno == errno.EPERM:
-                os.rename(new_name, self.path)
+                self.rename_from(new_name)
             else:
                 raise
         if old_stat is not None:
             try:
-                os.chown(self.path, old_stat.st_uid, os.stat(self.path).st_gid)
+                self.chown(old_stat.st_uid, self.stat().st_gid)
             except OSError:
                 pass
             try:
-                os.chown(self.path, os.stat(self.path).st_uid, old_stat.st_gid)
+                self.chown(self.stat().st_uid, old_stat.st_gid)
             except OSError:
                 pass
             try:
-                os.chmod(self.path, old_stat.st_mode)
+                self.chmod(old_stat.st_mode)
             except OSError as e:
                 warning("Failed to change new file mode to %o: %s", old_stat.st_mode, e)
         clear_cached_properties(self)
@@ -2039,7 +2049,7 @@ class SFSFile(FSPath):
             return False
 
     def validate_sfs(self):
-        if not os.path.isfile(self.path):
+        if not self.isfile():
             return False
         return self.open().read(4) == b"hsqs"
 
@@ -2210,8 +2220,8 @@ class SFSFile(FSPath):
         builder.build()
 
     def replace_with(self, other, progress_cb=None):
-        dst_temp = "%s.NEW.%s" % (self.path, os.getpid())
-        dst_fobj = open(dst_temp, "wb")
+        dst_temp = FSPath("%s.NEW.%s" % (self.path, os.getpid()))
+        dst_fobj = dst_temp.open("wb")
         create_stamp = None
         not_synced = 0
         checksum = self.checksum_algo()
