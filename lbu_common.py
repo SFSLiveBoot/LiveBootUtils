@@ -2280,7 +2280,24 @@ class SFSFile(FSPath):
 
     def replace_with(self, other, progress_cb=None):
         dst_temp = FSPath("%s.NEW.%s" % (self.path, os.getpid()))
-        dst_fobj = dst_temp.open("wb")
+        remount_mnt = None
+        try:
+            dst_fobj = dst_temp.open("wb")
+        except OSError as e:
+            if e.errno == errno.EROFS and sys.stdin.isatty():
+                remount_mnt = dst_temp.parent_directory.mountpoint
+                yesno = input(
+                    f"Try again with temporarily remounting {remount_mnt} read-write? [Y/n] "
+                )
+                if yesno == "" or yesno.lower().startswith("y"):
+                    run_command(
+                        ["mount", "-o", "remount,rw", remount_mnt.path], as_user="root"
+                    )
+                    dst_fobj = dst_temp.open("wb")
+                else:
+                    raise
+            else:
+                raise
         create_stamp = None
         not_synced = 0
         checksum = self.checksum_algo()
@@ -2320,6 +2337,8 @@ class SFSFile(FSPath):
         info("File digest: %s", checksum.hexdigest())
         if self.checksum_file:
             self.checksum_file.update(self, checksum.hexdigest())
+        if remount_mnt is not None:
+            run_command(["mount", "-o", "remount,ro", remount_mnt.path], as_user="root")
         sfs_finder.register_sfs(self)
 
     @cached_property
