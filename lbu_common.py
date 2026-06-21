@@ -3207,7 +3207,20 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
         source_dir = SFSDirectory(source_dir)
     target_dirs = list(map(SFSDirectory, target_dirs))
     if not target_dirs:
-        target_dirs = (SFSDirectoryAufs(),)
+        fn_ts_re = re.compile(r"^(.+)\.([0-9]+)$")
+        mnt = MountPoint("/")
+        target_dirs = []
+        for c in mnt.component_files:
+            try:
+                lbe = c.mountpoint.loop_backend
+            except NotLoopDev:
+                continue
+            m = fn_ts_re.match(lbe)
+            if m:
+                lbe_bn = m.group(1)
+                if os.path.exists(lbe_bn) and os.path.samefile(lbe_bn, lbe):
+                    lbe = lbe_bn
+            target_dirs.append(SFSDirectory(lbe))
     skip_sfs = set(os.environ.get("SFS_UPDATE_SKIP", "").split(","))
     for target_dir in target_dirs:
         last_dir = None
