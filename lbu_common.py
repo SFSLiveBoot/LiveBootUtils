@@ -3210,7 +3210,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
         fn_ts_re = re.compile(r"^(.+)\.([0-9]+)$")
         mnt = MountPoint("/")
         target_dirs = []
-        for c in mnt.component_files:
+        for c in reversed(mnt.component_files):
             try:
                 lbe = c.mountpoint.loop_backend
             except NotLoopDev:
