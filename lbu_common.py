@@ -257,6 +257,8 @@ def stamp2txt(stamp):
 class CLIProgressReporter(object):
     nr_buckets = 10
     output_stream = sys.stdout
+    label = None
+    started = None
 
     def __init__(self, full_size, **attrs):
         self.full_size = full_size
@@ -266,8 +268,14 @@ class CLIProgressReporter(object):
         list(map(lambda k: setattr(self, k, attrs[k]), attrs))
 
     def __call__(self, sz):
-        if sz is None:
-            print("100%", file=self.output_stream)
+        if self.started is None:
+            if self.label:
+                print(self.label, end=": ", file=self.output_stream)
+            self.started = time.time()
+
+        if sz is None or sz==self.full_size:
+            secs = time.time() - self.started
+            print(f"100% finished in {secs}s", file=self.output_stream)
         elif self.report_buckets and sz >= self.report_buckets[0]:
             print(
                 "%d%%.." % (100 * sz / self.full_size), end=" ", file=self.output_stream
@@ -1163,7 +1171,7 @@ class SFSBuilder(object):
 
     def make_sfs(self):
         dst_temp = "%s.NEW.%s" % (self.target.path, os.getpid())
-        cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend"]
+        cmd = ["mksquashfs", self.dest_dir.path, dst_temp, "-noappend", "-percentage", "-quiet"]
         if self.source is not None:
             git_source_url = self.source.source_url
             if git_source_url is not None:
@@ -1187,8 +1195,19 @@ class SFSBuilder(object):
                 "\n".join(["%s=%s" % (k_v[0], k_v[1]) for k_v in env_mod])
             )
         remount_ro = False
+
+        pr_display = pr_cls(100, label=f"creating {self.target.basename}")
+        def _stdout_proc(data):
+            perc = data.decode("utf-8").strip()
+            if perc.isdigit():
+                pr_display(int(perc))
+            elif not perc:
+                pr_display(None)
+            else:
+                print(f"data> {data!r}", flush=True)
+
         try:
-            run_command(cmd, show_output=True)
+            run_command(cmd, show_output=True, stdout_proc=_stdout_proc)
         except CommandFailed as e:
             warning("Command failed with: %s", e.stderr)
             if e.stderr.endswith("Read-only file system") and sys.stdin.isatty():
@@ -1199,7 +1218,9 @@ class SFSBuilder(object):
                 if yesno == "" or yesno.lower().startswith("y"):
                     run_command(["mount", "-o", "remount,rw", target_mnt.path])
                     remount_ro = True
-                    run_command(cmd, show_output=True)
+
+                    pr_display = pr_cls(100, label=f"creating {self.target.basename}")
+                    run_command(cmd, show_output=True, stdout_proc=_stdout_proc)
                 else:
                     if remount_ro:
                         try:
@@ -2995,7 +3016,22 @@ def _read_until_block(fobj):
     return "".join(buf) if isinstance(d, str) else b"".join(buf)
 
 
-def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
+def _print_cmd_output(data: str | bytes, fd_out = sys.stdout):
+    if isinstance(data, bytes):
+        data = data.decode("utf8")
+    fd_out.write(data.replace("\r\n", "\n").replace("\n", "\r\n"))
+    fd_out.flush()
+
+
+def run_command(
+    cmd,
+    cwd=None,
+    show_output=False,
+    env={},
+    as_user=None,
+    stdout_proc=None,
+    stderr_proc=None,
+):
     if as_user is not None:
         if isinstance(as_user, int):
             as_user = pwd.getpwuid(as_user)
@@ -3005,6 +3041,12 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
         if not os.getuid() == as_user.pw_uid:
             info("Change user %d->%d for %r", os.getuid(), as_user.pw_uid, cmd)
             cmd = ["sudo", "-E", "-u", as_user.pw_name] + cmd
+
+    if show_output:
+        if stdout_proc is None:
+            stdout_proc=_print_cmd_output
+        if stderr_proc is None:
+            stderr_proc = lambda d: _print_cmd_output(d, sys.stderr)  # noqa: E731
 
     cmd_env = {"PATH": "/sbin:/usr/sbin:" + os.environ["PATH"]}
     for k, v in env.items():
@@ -3026,9 +3068,9 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
         in_f = select.select(check_f, [], [], 1)[0]
         if not in_f:
             continue
-        for buf, f, log_tag, sys_f in (
-            (stdout_buf, proc.stdout, "stdout", sys.stdout),
-            (stderr_buf, proc.stderr, "stderr", sys.stderr),
+        for buf, f, log_tag in (
+            (stdout_buf, proc.stdout, "stdout"),
+            (stderr_buf, proc.stderr, "stderr"),
         ):
             if f not in in_f:
                 continue
@@ -3037,11 +3079,10 @@ def run_command(cmd, cwd=None, show_output=False, env={}, as_user=None):
                 check_f.remove(f)
                 continue
             buf.append(data)
-            if show_output:
-                sys_f.write(
-                    data.decode("utf8").replace("\r\n", "\n").replace("\n", "\r\n")
-                )
-                sys_f.flush()
+            if log_tag == "stdout" and stdout_proc is not None:
+                stdout_proc(data)
+            elif stderr_proc is not None:
+                stderr_proc(data)
             debug("%s: %r", log_tag, data.rstrip(b"\n"))
     stderr_data = b"".join(stderr_buf).rstrip(b"\n").decode("utf8")
     stdout_data = b"".join(stdout_buf).rstrip(b"\n").decode("utf8")

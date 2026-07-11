@@ -2,7 +2,7 @@
 
 set -eu
 
-: "${lbu:=/opt/LiveBootUtils}"
+: "${lbu:=$(readlink -f "$(dirname "$0")/..")}"
 : "${lbu_cli:=$lbu/lbu_cli.py}"
 : "${slb_repo:=https://github.com/SFSLiveBoot}"
 : "${dist:=$(lsb_release -cs)}"
