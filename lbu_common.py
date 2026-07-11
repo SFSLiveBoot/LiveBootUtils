@@ -259,30 +259,56 @@ class CLIProgressReporter(object):
     output_stream = sys.stdout
     label = None
     started = None
+    eta = True
 
     def __init__(self, full_size, **attrs):
         self.full_size = full_size
         self.report_buckets = [
             i * full_size / self.nr_buckets for i in range(self.nr_buckets)
         ]
+        self._last_line_len = 0
         list(map(lambda k: setattr(self, k, attrs[k]), attrs))
+
+    def _format_duration(self, secs):
+        mins, secs = divmod(int(secs), 60)
+        hours, mins = divmod(mins, 60)
+        if hours:
+            return f"{hours:d}h{mins:02d}m{secs:02d}s"
+        if mins:
+            return f"{mins:d}m{secs:02d}s"
+        return f"{secs:d}s"
+
+    def _write_progress(self, line, end="\r"):
+        padded_line = line + " " * max(0, self._last_line_len - len(line))
+        self.output_stream.write(padded_line + end)
+        self.output_stream.flush()
+        self._last_line_len = len(line)
 
     def __call__(self, sz):
         if self.started is None:
-            if self.label:
-                print(self.label, end=": ", file=self.output_stream)
             self.started = time.time()
 
-        if sz is None or sz==self.full_size:
+        label_prefix = f"{self.label}: " if self.label else ""
+
+        if sz is None or sz == self.full_size:
             secs = time.time() - self.started
-            print(f"100% finished in {secs}s", file=self.output_stream)
-        elif self.report_buckets and sz >= self.report_buckets[0]:
-            print(
-                "%d%%.." % (100 * sz / self.full_size), end=" ", file=self.output_stream
+            self._write_progress(
+                f"{label_prefix}100% finished in {self._format_duration(secs)}",
+                end="\n",
             )
+        elif self.report_buckets and sz >= self.report_buckets[0]:
+            percent = int(100 * sz / self.full_size)
+            line = f"{label_prefix}{percent}%.."
+            if self.eta and sz > 0 and self.full_size > sz:
+                elapsed = time.time() - self.started
+                rate = sz / elapsed if elapsed > 0 else None
+                if rate:
+                    remaining = self.full_size - sz
+                    eta = remaining / rate
+                    line += f" ETA {self._format_duration(eta)}"
+            self._write_progress(line)
             while self.report_buckets and sz >= self.report_buckets[0]:
                 self.report_buckets.pop(0)
-        self.output_stream.flush()
 
 
 pr_cls = CLIProgressReporter
@@ -1201,9 +1227,7 @@ class SFSBuilder(object):
             perc = data.decode("utf-8").strip()
             if perc.isdigit():
                 pr_display(int(perc))
-            elif not perc:
-                pr_display(None)
-            else:
+            elif perc:
                 print(f"data> {data!r}", flush=True)
 
         try:
