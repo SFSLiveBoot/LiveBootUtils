@@ -1222,7 +1222,7 @@ class SFSBuilder(object):
             )
         remount_ro = False
 
-        pr_display = pr_cls(100, label=f"creating {self.target.basename}")
+        pr_display = pr_cls(100, label=f"Creating {self.target.basename}")
         def _stdout_proc(data):
             perc = data.decode("utf-8").strip()
             if perc.isdigit():
@@ -1243,7 +1243,7 @@ class SFSBuilder(object):
                     run_command(["mount", "-o", "remount,rw", target_mnt.path])
                     remount_ro = True
 
-                    pr_display = pr_cls(100, label=f"creating {self.target.basename}")
+                    pr_display = pr_cls(100, label=f"Creating {self.target.basename}")
                     run_command(cmd, show_output=True, stdout_proc=_stdout_proc)
                 else:
                     if remount_ro:
@@ -2369,8 +2369,6 @@ class SFSFile(FSPath):
                     not_synced = 0
                 if progress_cb:
                     progress_cb(nbytes)
-            if progress_cb:
-                progress_cb(None)
         if self.fsync_size > 0 and not_synced > 0:
             dst_fobj.flush()
             try:
@@ -2875,7 +2873,7 @@ class BootDirBuilder(FSPath):
             ):
                 src_sfs = SFSFile(src_url)
                 if not dest_sfs.exists or src_sfs.create_stamp > dest_sfs.create_stamp:
-                    dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size))
+                    dest_sfs.replace_with(src_sfs, pr_cls(src_sfs.file_size, label="Downloading %s" % (sfs_name)))
                 sfs_finder.register_sfs(dest_sfs)
                 continue
             if dest_sfs.exists and not dest_sfs.needs_update:
@@ -3359,7 +3357,7 @@ def update_sfs(source_dir, no_act=False, *target_dirs):
                     stamp2txt(dst_sfs.create_stamp),
                 )
                 if not no_act:
-                    dst_sfs.replace_with(src_sfs, progress_cb=pr_cls(src_sfs.file_size))
+                    dst_sfs.replace_with(src_sfs, progress_cb=pr_cls(src_sfs.file_size, label="Replacing %s" % (dst_sfs.basename,)))
             elif src_sfs.create_stamp == dst_sfs.create_stamp:
                 info(
                     "Keeping same %s: %s",
