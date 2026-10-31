@@ -677,7 +677,11 @@ dl_file() {
   *)
   test -s "$cached_file" || {
     mkdir -p "${cached_file%/*}"
-    wget -O "${cached_file}.dl-tmp.$$" "$url" >&2 || return 1
+    if command -v curl >/dev/null;then
+      curl -SfgL -o "${cached_file}.dl-tmp.$$" "$url" >&2 || return 1
+    else
+      wget -O "${cached_file}.dl-tmp.$$" "$url" >&2 || return 1
+    fi
     mv "${cached_file}.dl-tmp.$$" "$cached_file"
   }
   ;; esac
